@@ -2,6 +2,12 @@
 name = "roleta"
 version = "0.1.0"
 edition = "2024"
+description = "Menu radial para Windows acionado pelo botão lateral do mouse"
+license = "BSD-3-Clause"
+repository = "https://github.com/1155dosilicon/roleta-rs"
+readme = "README.md"
+keywords = ["windows", "mouse", "pie-menu", "radial-menu", "atalhos"]
+categories = ["gui"]
 
 [dependencies]
 resvg = "0.50.0"

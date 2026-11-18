@@ -1,10 +1,12 @@
 # 🎯 Roleta
 
-[![Rust](https://img.shields.io/badge/Rust-2024-edition)](https://www.rust-lang.org/pt-BR)
+[![Rust](https://img.shields.io/badge/Rust-edi%C3%A7%C3%A3o_2024-orange?logo=rust)](https://www.rust-lang.org/pt-BR)
 [![Plataforma](https://img.shields.io/badge/plataforma-Windows-blue)](https://github.com/1155dosilicon/roleta-rs)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-BSD--3--Clause-green)](LICENSE)
 
 Menu radial (roleta de opções) para Windows, acionado pelo **botão lateral do mouse**. Segure o botão, aponte na direção da opção desejada e solte para executar. Escrito 100% em Rust, num único executável.
+
+<p align="center"><img src="docs/roleta.png" alt="Roleta aberta com a opção Terminal selecionada" width="360"></p>
 
 > Parecido com o [pie menu](https://en.wikipedia.org/wiki/Pie_menu) de softwares como o CAD ou o *Radial Menu* do StrokesPlus — mas sem dependências, sem runtime, nativo.
 
@@ -15,12 +17,12 @@ Menu radial (roleta de opções) para Windows, acionado pelo **botão lateral do
   - **Segurar e soltar**: mantenha o botão lateral pressionado, arraste na direção da opção e solte
   - **Clique fixo**: um clique rápido abre a roleta fixa; escolha com o botão esquerdo, cancele com o direito
 - **5 tipos de ação**: `abrir` (arquivo, pasta, site, URI ou programa), `comando`, `teclas` (atalhos de teclado), `texto` (digitação) e `sair`
-- **Aparência autoral**: fatias em degradê, ícones SVG embutidos, glifos da fonte [Segoe Fluent Icons](https://learn.microsoft.com/pt-br/windows/apps/design/style/segoe-fluent-icons-font) e suporte a SVG próprio
+- **Aparência própria**: fatias em degradê, ícones SVG embutidos, glifos da fonte [Segoe Fluent Icons](https://learn.microsoft.com/pt-br/windows/apps/design/style/segoe-fluent-icons-font) e suporte a SVG próprio
 - **Funciona sobre janelas elevadas**: o hook do mouse é global e o processo roda com privilégio de administrador, então a roleta abre até sobre o Gerenciador de Tarefas
 - **Programas abertos rodam como usuário normal**: quando a roleta está elevada, os processos que ela lança são re-paiados para o Explorer, sem herdar permissões de admin (segurança)
-- **Ícone na bandeja** com menu para configurar, pré-visualizar e sair
+- **Ícone na bandeja** com menu para editar as opções, reiniciar (aplica as mudanças) e sair
 - **Instância única**: não abre duas roletas ao mesmo tempo (mutex)
-- **Zero dependências em runtime**: um único `.exe` (~2 MB), sem .NET, sem Python, sem instalador de terceiros
+- **Zero dependências em runtime**: um único `.exe` (~3 MB), sem .NET, sem Python, sem instalador de terceiros
 - **Log de erros** em `%APPDATA%\Roleta\roleta.log`
 
 ## ⚙️ Requisitos
@@ -62,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File instalar.ps1 -Desinstalar
 | Soltar no centro ou fora da roleta | Cancela |
 | **Clique rápido** no botão lateral | A roleta fica aberta; escolha com o botão esquerdo |
 | Botão direito (roleta aberta) | Cancela |
-| Clique no ícone da bandeja | Menu: Configurar, Prévia, Sair |
+| Clique no ícone da bandeja | Menu: Editar opções, Reiniciar, Sair |
 
 ## 📝 Configuração
 
@@ -138,6 +140,7 @@ O arquivo `%APPDATA%\Roleta\roleta_config.json` é criado na primeira execução
 $env:ROLETA_CONFIG = "C:\caminho\outra_config.json"   # outra config
 cargo run -- --teste                                   # roda ao lado da instalada
 cargo run -- --previa "$env:TEMP"                      # gera PNGs do visual e sai
+$env:ROLETA_DEBUG = 1                                  # registra os eventos do hook no log
 ```
 
 ## 🏗️ Arquitetura
@@ -148,9 +151,9 @@ flowchart LR
     B --> C[janela.rs<br/>janela, bandeja, loop]
     C --> D[hook.rs<br/>WH_MOUSE_LL global]
     D -- PostMessage --> C
-    C --> E[desenho.rs<br/>roleta com skia-safe]
+    C --> E[desenho.rs<br/>roleta com resvg/tiny-skia]
     C --> F[acoes.rs<br/>executa as opções]
-    F --> G[log.rs<br/>%APPDATA%\Roleta\roleta.log]
+    F --> G[log.rs<br/>roleta.log]
 ```
 
 | Módulo | Responsabilidade |
@@ -176,7 +179,7 @@ cargo build --release
 ```
 
 - `build.rs` e `winresource` embutem o ícone `.ico` e o manifesto no `.exe`
-- `examples/gerar_icone.rs` regenera os ícones a partir dos SVGs em `assets/`
+- `examples/gerar_icone.rs` regenera o `.ico` a partir dos SVGs em `assets/` (`cargo run --release --example gerar_icone`)
 - Pré-visualização de telas: `cargo run -- --previa pasta`
 
 ## 📂 Estrutura
@@ -184,12 +187,13 @@ cargo build --release
 ```
 roleta-rs/
 ├── assets/            # SVGs dos ícones embutidos + ícone do .exe
+├── docs/              # imagem do README
 ├── examples/
 │   └── gerar_icone.rs # gera o .ico a partir dos SVGs
 ├── src/
 │   ├── acoes.rs       # ações das opções (abrir, comando, teclas, texto)
 │   ├── config.rs      # carregamento da configuração JSON
-│   ├── desenho.rs     # desenho da roleta (skia-safe)
+│   ├── desenho.rs     # desenho da roleta (resvg/tiny-skia)
 │   ├── hook.rs        # hook global do mouse
 │   ├── janela.rs      # janela, bandeja e loop de eventos
 │   ├── log.rs         # log de erros

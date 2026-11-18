@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="grad-arcoiris" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#FF3CAC"/>
+      <stop offset="28%"  stop-color="#784BA0"/>
+      <stop offset="56%"  stop-color="#2B86C5"/>
+      <stop offset="82%"  stop-color="#00F5D4"/>
+      <stop offset="100%" stop-color="#FEE440"/>
+    </linearGradient>
+    <radialGradient id="fundo-vidro" cx="50%" cy="50%" r="50%">
+      <stop offset="25%"  stop-color="#0F172A" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#1E293B" stop-opacity="0.88"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Anel principal (com furo central via evenodd) -->
+  <path fill="url(#fundo-vidro)" fill-rule="evenodd"
+        d="M 256 26 A 230 230 0 1 0 256 486 A 230 230 0 1 0 256 26 Z
+           M 256 188 A 68 68 0 1 1 256 324 A 68 68 0 1 1 256 188 Z"/>
+
+  <!-- Contornos em gradiente colorido -->
+  <circle cx="256" cy="256" r="230" fill="none" stroke="url(#grad-arcoiris)" stroke-width="5"/>
+  <circle cx="256" cy="256" r="68"  fill="none" stroke="url(#grad-arcoiris)" stroke-width="3.5"/>
+
+  <!-- Divisórias sutis -->
+  <g stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.16">
+    <line x1="216.03" y1="200.99" x2="120.81" y2="69.93"/>
+    <line x1="295.97" y1="200.99" x2="391.19" y2="69.93"/>
+    <line x1="320.67" y1="277.01" x2="474.74" y2="327.07"/>
+    <line x1="256.00" y1="324.00" x2="256.00" y2="486.00"/>
+    <line x1="191.33" y1="277.01" x2="37.26"  y2="327.07"/>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Anéis externos e internos (R=230 e R=68) -->
+  <circle cx="256" cy="256" r="230" fill="none" stroke="#CBD5E1" stroke-width="2.5" stroke-opacity="0.85"/>
+  <circle cx="256" cy="256" r="222" fill="none" stroke="#CBD5E1" stroke-width="1" stroke-opacity="0.3" stroke-dasharray="6 6"/>
+  <circle cx="256" cy="256" r="68" fill="none" stroke="#CBD5E1" stroke-width="2.5" stroke-opacity="0.85"/>
+
+  <!-- 5 Divisórias (ângulos: -126°, -54°, 18°, 90°, 162°) -->
+  <g stroke="#CBD5E1" stroke-width="2" stroke-opacity="0.7" stroke-linecap="round">
+    <line x1="216.03" y1="200.99" x2="120.81" y2="69.93"/>
+    <line x1="295.97" y1="200.99" x2="391.19" y2="69.93"/>
+    <line x1="320.67" y1="277.01" x2="474.74" y2="327.07"/>
+    <line x1="256.00" y1="324.00" x2="256.00" y2="486.00"/>
+    <line x1="191.33" y1="277.01" x2="37.26"  y2="327.07"/>
+  </g>
+</svg>

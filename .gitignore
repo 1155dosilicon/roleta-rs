@@ -1,0 +1,6 @@
+# build Rust
+/target
+
+# temporários
+*.log
+*.tmp

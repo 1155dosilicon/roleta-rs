@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Vermelho (topo) -->
+  <path d="M 14.17 19.12 A 22 22 0 0 1 52.07 23 L 32 23 L 24.21 36.5 Z" fill="#EA4335"/>
+  <!-- Amarelo (direita) -->
+  <path d="M 52.07 23 A 22 22 0 0 1 29.76 53.88 L 39.79 36.5 L 32 23 Z" fill="#FBBC05"/>
+  <!-- Verde (esquerda) -->
+  <path d="M 29.76 53.88 A 22 22 0 0 1 14.17 19.12 L 24.21 36.5 L 39.79 36.5 Z" fill="#34A853"/>
+  <!-- Miolo branco + azul -->
+  <circle cx="32" cy="32" r="10.5" fill="#FFFFFF"/>
+  <circle cx="32" cy="32" r="8" fill="#4285F4"/>
+</svg>

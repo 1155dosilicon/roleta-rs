@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g-print" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="#00F5D4" stroke-width="3.5" stroke-linecap="round">
+    <path d="M 10 21 V 14 C 10 11.8 11.8 10 14 10 H 21"/>
+    <path d="M 43 10 H 50 C 52.2 10 54 11.8 54 14 V 21"/>
+    <path d="M 54 43 V 50 C 54 52.2 52.2 54 50 54 H 43"/>
+    <path d="M 21 54 H 14 C 11.8 54 10 52.2 10 50 V 43"/>
+  </g>
+  <path d="M 18 24 H 25 L 27.5 19.5 H 36.5 L 39 24 H 46 C 47.7 24 49 25.3 49 27 V 41 C 49 42.7 47.7 44 46 44 H 18 C 16.3 44 15 42.7 15 41 V 27 C 15 25.3 16.3 24 18 24 Z"
+        fill="url(#g-print)"/>
+  <circle cx="32" cy="34" r="6" fill="#0F172A" stroke="#E0F2FE" stroke-width="2.5"/>
+</svg>

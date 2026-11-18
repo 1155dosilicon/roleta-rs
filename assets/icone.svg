@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="arcoiris" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF3CAC"/><stop offset=".28" stop-color="#784BA0"/>
+      <stop offset=".56" stop-color="#2B86C5"/><stop offset=".82" stop-color="#00F5D4"/>
+      <stop offset="1" stop-color="#FEE440"/>
+    </linearGradient>
+    <radialGradient id="vidro" cx=".5" cy=".5" r=".5">
+      <stop offset=".25" stop-color="#0F172A"/><stop offset="1" stop-color="#1E293B"/>
+    </radialGradient>
+    <linearGradient id="fatia" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF3CAC" stop-opacity=".9"/><stop offset=".5" stop-color="#2B86C5" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#00F5D4" stop-opacity=".9"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="29" fill="url(#vidro)" stroke="url(#arcoiris)" stroke-width="4"/>
+  <path d="M16.13 10.16 A27 27 0 0 1 47.87 10.16 L39.05 22.29 A12 12 0 0 0 24.95 22.29 Z" fill="url(#fatia)"/>
+  <g stroke="#FFFFFF" stroke-opacity=".25" stroke-width="1.2" stroke-linecap="round">
+    <line x1="43.41" y1="35.71" x2="57.68" y2="40.34"/>
+    <line x1="32" y1="44" x2="32" y2="59"/>
+    <line x1="20.59" y1="35.71" x2="6.32" y2="40.34"/>
+  </g>
+  <circle cx="32" cy="32" r="11" fill="#0F172A" stroke="url(#arcoiris)" stroke-width="2.5"/>
+  <circle cx="32" cy="32" r="3" fill="#E2E8F0"/>
+</svg>

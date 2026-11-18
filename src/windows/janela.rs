@@ -22,11 +22,11 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::acoes::{self, wide};
+use super::acoes::{self, wide};
+use super::hook;
 use crate::config::{self, Config};
-use crate::desenho::{Desenho, Estado, MARGEM};
-use crate::hook;
 use crate::log;
+use crate::roleta::{self, Roleta, Tick};
 
 const WM_BANDEJA: u32 = WM_APP + 2;
 const ID_ANIM: usize = 1;
@@ -34,10 +34,6 @@ const ID_ACAO: usize = 2;
 const CMD_EDITAR: usize = 10;
 const CMD_REINICIAR: usize = 11;
 const CMD_SAIR: usize = 12;
-
-const TEMPO_CLIQUE: f32 = 0.25; // soltar antes disso no centro = modo clique
-const T_ABRIR: f32 = 0.16;
-const T_FECHAR: f32 = 0.10;
 
 static MSG_TASKBAR: AtomicU32 = AtomicU32::new(0);
 
@@ -87,25 +83,9 @@ impl Drop for Dib {
 struct App {
     ctrl: HWND,
     janela: HWND,
-    cfg: Config,
-    desenho: Desenho,
+    r: Roleta,
     dib: Option<Dib>,
     icone: HICON,
-
-    aberta: bool,
-    visivel: bool,
-    t_abertura: Instant,
-    t_fecho: Option<(Instant, f32)>,
-    ultimo: Instant,
-    prog: f32,
-    selecionada: Option<usize>,
-    hover: Vec<f32>,
-    esmaecer: f32,
-    cancelar: f32,
-    centro: POINT,
-    canto: POINT,
-    escala: f32,
-
     acao_pendente: Option<usize>,
     reiniciar: bool,
 }
@@ -125,38 +105,20 @@ fn cursor() -> POINT {
     p
 }
 
+fn ponto() -> roleta::Ponto {
+    let p = cursor();
+    (p.x, p.y)
+}
+
 impl App {
-    fn dist_e_angulo(&self) -> (f32, f32) {
-        let p = cursor();
-        let dx = (p.x - self.centro.x) as f32 / self.escala;
-        let dy = (p.y - self.centro.y) as f32 / self.escala;
-        (dx.hypot(dy), dy.atan2(dx))
-    }
-
-    fn indice_sob_cursor(&self) -> Option<usize> {
-        let (dist, ang) = self.dist_e_angulo();
-        // no centro ou fora da roleta = nada selecionado (soltar cancela)
-        if dist < self.desenho.geo.r_furo || dist > self.desenho.geo.r {
-            return None;
-        }
-        let n = self.cfg.opcoes.len();
-        let larg = std::f32::consts::TAU / n as f32;
-        let rel = (ang + std::f32::consts::FRAC_PI_2).rem_euclid(std::f32::consts::TAU);
-        Some((rel / larg).round() as usize % n)
-    }
-
-    fn longe_demais(&self) -> bool {
-        self.dist_e_angulo().0 > self.desenho.geo.r + MARGEM - 4.0
+    /// O hook precisa saber se deve capturar os cliques esquerdo/direito.
+    fn sincronizar(&self) {
+        hook::MODO_CLIQUE.store(self.r.modo_clique, Relaxed);
     }
 
     fn abrir(&mut self) {
-        if self.aberta {
-            // clicou de novo com ela aberta: fecha
-            self.fechar();
-            return;
-        }
         let pt = cursor();
-        unsafe {
+        let (monitor, escala) = unsafe {
             let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
             let mut mi: MONITORINFO = std::mem::zeroed();
             mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -165,110 +127,60 @@ impl App {
             if GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy) != 0 {
                 dx = 96;
             }
-            self.escala = dx as f32 / 96.0;
-            self.desenho.preparar(self.escala);
-            let lado = self.desenho.lado_px();
-            if self.dib.as_ref().map(|d| d.lado) != Some(lado) {
-                self.dib = Dib::new(lado);
-            }
-            // a janela inteira cabe na tela
-            let meio = lado as i32 / 2;
             let r = mi.rcMonitor;
-            let cx = pt.x.max(r.left + meio).min((r.right - meio).max(r.left + meio));
-            let cy = pt.y.max(r.top + meio).min((r.bottom - meio).max(r.top + meio));
-            self.centro = POINT { x: cx, y: cy };
-            self.canto = POINT { x: cx - meio, y: cy - meio };
+            ((r.left, r.top, r.right, r.bottom), dx as f32 / 96.0)
+        };
+        let estava_visivel = self.r.visivel;
+        if !self.r.abrir((pt.x, pt.y), monitor, escala) {
+            self.sincronizar();
+            return;
         }
-
-        self.selecionada = None;
-        self.hover = vec![0.0; self.cfg.opcoes.len()];
-        self.esmaecer = 0.0;
-        self.cancelar = 1.0;
-        self.aberta = true;
-        self.t_fecho = None;
-        self.t_abertura = Instant::now();
-        self.ultimo = self.t_abertura;
-        self.prog = 0.0;
+        self.sincronizar();
+        let lado = self.r.lado();
+        if self.dib.as_ref().map(|d| d.lado) != Some(lado) {
+            self.dib = Dib::new(lado);
+        }
         self.pintar();
         unsafe {
             ShowWindow(self.janela, SW_SHOWNOACTIVATE);
             SetWindowPos(self.janela, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            if !self.visivel {
+            if !estava_visivel {
                 timeBeginPeriod(1); // timer de 10 ms de verdade enquanto anima
-                SetTimer(self.ctrl, ID_ANIM, 10, None);
+                SetTimer(self.ctrl, ID_ANIM, roleta::INTERVALO.as_millis() as u32, None);
             }
         }
-        self.visivel = true;
     }
 
     fn fechar(&mut self) {
-        if !self.aberta {
-            return;
+        self.r.fechar();
+        self.sincronizar();
+    }
+
+    fn agendar(&mut self, idx: Option<usize>) {
+        self.sincronizar();
+        if let Some(i) = idx {
+            self.acao_pendente = Some(i);
+            unsafe { SetTimer(self.ctrl, ID_ACAO, roleta::ATRASO_ACAO.as_millis() as u32, None) };
         }
-        self.aberta = false;
-        hook::MODO_CLIQUE.store(false, Relaxed);
-        self.t_fecho = Some((Instant::now(), self.prog));
     }
 
     fn confirmar(&mut self) {
-        let idx = self.indice_sob_cursor();
-        self.fechar();
-        if let Some(i) = idx {
-            // pequeno atraso para a roleta sumir antes da ação
-            self.acao_pendente = Some(i);
-            unsafe { SetTimer(self.ctrl, ID_ACAO, 120, None) };
-        }
+        let idx = self.r.confirmar(ponto());
+        self.agendar(idx);
     }
 
     fn soltar(&mut self) {
-        if !self.aberta {
-            return;
-        }
-        let rapido = self.t_abertura.elapsed().as_secs_f32() < TEMPO_CLIQUE;
-        if rapido && self.indice_sob_cursor().is_none() {
-            hook::MODO_CLIQUE.store(true, Relaxed); // fica aberta esperando clique
-        } else {
-            self.confirmar();
-        }
+        let idx = self.r.soltar(ponto());
+        self.agendar(idx);
     }
 
     fn tick(&mut self) {
-        if !self.visivel {
-            return;
+        match self.r.tick(ponto()) {
+            Tick::Pintar => self.pintar(),
+            Tick::Esconder => self.esconder(),
+            Tick::Nada => {}
         }
-        let agora = Instant::now();
-        let dt = (agora - self.ultimo).as_secs_f32().min(0.1);
-        self.ultimo = agora;
-        if self.aberta {
-            let t = ((agora - self.t_abertura).as_secs_f32() / T_ABRIR).min(1.0);
-            self.prog = 1.0 - (1.0 - t).powi(3);
-            if self.longe_demais() {
-                // saiu da roleta: fecha (e não fica presa se o botão for
-                // solto em cima de uma janela de administrador)
-                self.fechar();
-                return;
-            }
-            self.selecionada = self.indice_sob_cursor();
-        } else if let Some((t0, p0)) = self.t_fecho {
-            let t = ((agora - t0).as_secs_f32() / T_FECHAR).min(1.0);
-            self.prog = p0 * (1.0 - t);
-            if t >= 1.0 {
-                self.prog = 0.0;
-                self.esconder();
-                return;
-            }
-        }
-
-        // transições suaves do destaque (independente da taxa de quadros)
-        let k = 1.0 - 0.68f32.powf(dt / 0.010);
-        for (i, h) in self.hover.iter_mut().enumerate() {
-            let alvo = if Some(i) == self.selecionada { 1.0 } else { 0.0 };
-            *h += (alvo - *h) * k;
-        }
-        let tem = self.selecionada.is_some() as i32 as f32;
-        self.esmaecer += (tem - self.esmaecer) * k;
-        self.cancelar += ((1.0 - tem) - self.cancelar) * k;
-        self.pintar();
+        self.sincronizar();
     }
 
     fn esconder(&mut self) {
@@ -277,12 +189,12 @@ impl App {
             timeEndPeriod(1);
             ShowWindow(self.janela, SW_HIDE);
         }
-        self.visivel = false;
     }
 
     fn pintar(&mut self) {
-        let est = Estado { prog: self.prog, hover: &self.hover, esmaecer: self.esmaecer, cancelar: self.cancelar };
-        let pm = self.desenho.desenhar(&est);
+        let alfa = self.r.alfa();
+        let canto = POINT { x: self.r.canto.0, y: self.r.canto.1 };
+        let pm = self.r.quadro();
         let Some(dib) = &self.dib else { return };
         let lado = dib.lado;
         if pm.width() != lado {
@@ -296,7 +208,6 @@ impl App {
             d[2] = s[0];
             d[3] = s[3];
         }
-        let alfa = ((self.prog * 1.25).min(1.0) * 255.0).round() as u8;
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -307,7 +218,7 @@ impl App {
         let origem = POINT { x: 0, y: 0 };
         unsafe {
             let tela = GetDC(null_mut());
-            UpdateLayeredWindow(self.janela, tela, &self.canto, &tam, dib.dc, &origem, 0, &blend, ULW_ALPHA);
+            UpdateLayeredWindow(self.janela, tela, &canto, &tam, dib.dc, &origem, 0, &blend, ULW_ALPHA);
             ReleaseDC(null_mut(), tela);
         }
     }
@@ -336,7 +247,7 @@ impl App {
         let nid = self.dados_bandeja();
         unsafe {
             Shell_NotifyIconW(NIM_DELETE, &nid);
-            if self.visivel {
+            if self.r.visivel {
                 timeEndPeriod(1);
             }
             PostQuitMessage(0);
@@ -351,7 +262,7 @@ fn evento(ev: usize) {
     com_app(|a| match ev {
         hook::EV_ABRIR => a.abrir(),
         hook::EV_SOLTAR => a.soltar(),
-        hook::EV_CLIQUE if a.aberta => a.confirmar(),
+        hook::EV_CLIQUE if a.r.aberta => a.confirmar(),
         hook::EV_CANCELAR => a.fechar(),
         _ => {}
     });
@@ -362,7 +273,7 @@ fn executar_pendente() {
     // podem processar mensagens enquanto rodam)
     let op = com_app(|a| {
         unsafe { KillTimer(a.ctrl, ID_ACAO) };
-        a.acao_pendente.take().and_then(|i| a.cfg.opcoes.get(i).cloned())
+        a.acao_pendente.take().and_then(|i| a.r.opcao(i))
     })
     .flatten();
     if let Some(op) = op {
@@ -435,7 +346,7 @@ unsafe extern "system" fn proc_janela(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         // cliques que chegam direto na janela (quando o hook não os pegou)
         WM_LBUTTONDOWN => {
             com_app(|a| {
-                if a.aberta {
+                if a.r.aberta {
                     a.confirmar()
                 }
             });
@@ -490,39 +401,15 @@ pub fn rodar(cfg: Config) -> bool {
         let icone = LoadImageW(inst, 1 as _, IMAGE_ICON, lado_ic, lado_ic, LR_DEFAULTCOLOR) as HICON;
 
         let t0 = Instant::now();
-        let desenho = Desenho::new(&cfg, &config::pasta_dados());
         let botao = cfg.botao.clone();
-        let n = cfg.opcoes.len();
-        let app = App {
-            ctrl,
-            janela,
-            cfg,
-            desenho,
-            dib: None,
-            icone,
-            aberta: false,
-            visivel: false,
-            t_abertura: Instant::now(),
-            t_fecho: None,
-            ultimo: Instant::now(),
-            prog: 0.0,
-            selecionada: None,
-            hover: vec![0.0; n],
-            esmaecer: 0.0,
-            cancelar: 1.0,
-            centro: POINT { x: 0, y: 0 },
-            canto: POINT { x: 0, y: 0 },
-            escala: 1.0,
-            acao_pendente: None,
-            reiniciar: false,
-        };
+        let app = App { ctrl, janela, r: Roleta::new(cfg), dib: None, icone, acao_pendente: None, reiniciar: false };
         APP.with(|a| *a.borrow_mut() = Some(app));
         // já deixa os desenhos prontos para o monitor principal
         com_app(|a| {
             let mon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTONEAREST);
             let (mut dx, mut dy) = (96u32, 96u32);
             GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
-            a.desenho.preparar(dx as f32 / 96.0);
+            a.r.desenho.preparar(dx as f32 / 96.0);
             a.mostrar_bandeja();
         });
         hook::iniciar(ctrl, &botao);
@@ -549,33 +436,5 @@ pub fn rodar(cfg: Config) -> bool {
         DestroyWindow(ctrl);
         APP.with(|a| *a.borrow_mut() = None);
         reiniciar
-    }
-}
-
-/// Renderiza imagens de prévia (sem janela), para conferir o visual.
-pub fn previa(pasta: &str) {
-    let cfg = config::carregar();
-    let mut d = Desenho::new(&cfg, &config::pasta_dados());
-    let n = cfg.opcoes.len();
-    let _ = std::fs::create_dir_all(pasta);
-    for escala in [1.0f32, 1.5] {
-        d.preparar(escala);
-        let casos: Vec<(String, Vec<f32>, f32)> = vec![
-            ("nenhuma".into(), vec![0.0; n], 0.0),
-            ("sel0".into(), (0..n).map(|i| (i == 0) as i32 as f32).collect(), 1.0),
-            ("sel2".into(), (0..n).map(|i| (i == 2) as i32 as f32).collect(), 1.0),
-        ];
-        for (nome, hover, esm) in casos {
-            let est = Estado { prog: 1.0, hover: &hover, esmaecer: esm, cancelar: 1.0 - esm };
-            let pm = d.desenhar(&est).clone();
-            // fundo cinza-azulado para enxergar a transparência
-            let mut fundo = resvg::tiny_skia::Pixmap::new(pm.width(), pm.height()).unwrap();
-            fundo.fill(resvg::tiny_skia::Color::from_rgba8(0x3a, 0x4a, 0x5a, 255));
-            fundo.draw_pixmap(0, 0, pm.as_ref(), &Default::default(), resvg::tiny_skia::Transform::identity(), None);
-            let arq = format!("{pasta}/previa_{nome}_{escala}x.png");
-            if let Err(e) = fundo.save_png(&arq) {
-                eprintln!("{arq}: {e}");
-            }
-        }
     }
 }

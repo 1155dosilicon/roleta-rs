@@ -216,7 +216,7 @@ impl Desenho {
     pub fn new(cfg: &Config, dados: &Path) -> Self {
         let mut db = usvg::fontdb::Database::new();
         db.load_system_fonts();
-        db.set_sans_serif_family("Segoe UI");
+        db.set_sans_serif_family(if cfg!(windows) { "Segoe UI" } else { "Inter" });
         let opt = usvg::Options { fontdb: Arc::new(db), ..Default::default() };
         let opcoes = cfg
             .opcoes
@@ -291,7 +291,7 @@ impl Desenho {
     fn glifo(&self, c: char, tam: u32, cor: &str) -> Option<sk::Pixmap> {
         let t = tam as f32;
         let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{t}" height="{t}" viewBox="0 0 {t} {t}"><text x="{}" y="{}" font-family="Segoe Fluent Icons, Segoe MDL2 Assets" font-size="{}" fill="{cor}" text-anchor="middle">&#x{:X};</text></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{t}" height="{t}" viewBox="0 0 {t} {t}"><text x="{}" y="{}" font-family="Segoe Fluent Icons, Segoe MDL2 Assets, Symbols Nerd Font, JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font" font-size="{}" fill="{cor}" text-anchor="middle">&#x{:X};</text></svg>"#,
             t / 2.0,
             t * 0.72,
             t * 0.55,
@@ -313,14 +313,14 @@ impl Desenho {
         }
         let h = (lh * linhas.len() as f32 + fs * 0.35).ceil();
         format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><g font-family="Segoe UI" font-weight="600" font-size="{fs}" fill="{cor}">{s}</g></svg>"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><g font-family="Segoe UI, Inter, Noto Sans, DejaVu Sans, sans-serif" font-weight="600" font-size="{fs}" fill="{cor}">{s}</g></svg>"#
         )
     }
 
     fn largura(&self, txt: &str, fs: f32) -> f32 {
         let svg = self.svg_texto(&[txt.to_string()], fs, "#000", 2000.0);
         self.arvore(&svg)
-            .and_then(|t| t.root().abs_bounding_box().map(|b| b.width()).into())
+            .and_then(|t| t.root().abs_bounding_box().map(|b| b.width()))
             .unwrap_or(fs * 0.6 * txt.chars().count() as f32)
     }
 

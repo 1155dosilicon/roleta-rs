@@ -1,13 +1,28 @@
-//! Log simples em %APPDATA%\Roleta\roleta.log.
+//! Log simples: %APPDATA%\Roleta\roleta.log (Windows) ou
+//! ~/.local/state/roleta/roleta.log (Linux, também vai para o stderr).
 
 use std::io::Write;
-use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+use std::path::PathBuf;
 
-fn caminho() -> std::path::PathBuf {
+#[cfg(windows)]
+fn caminho() -> PathBuf {
     crate::config::pasta_dados().join("roleta.log")
 }
 
+#[cfg(not(windows))]
+fn caminho() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| crate::config::pasta_usuario().join(".local/state"));
+    let p = base.join("roleta");
+    let _ = std::fs::create_dir_all(&p);
+    p.join("roleta.log")
+}
+
+#[cfg(windows)]
 fn agora() -> String {
+    use windows_sys::Win32::System::SystemInformation::GetLocalTime;
     let t = unsafe {
         let mut t = std::mem::zeroed();
         GetLocalTime(&mut t);
@@ -19,9 +34,32 @@ fn agora() -> String {
     )
 }
 
+#[cfg(not(windows))]
+fn agora() -> String {
+    // SAFETY: localtime_r só escreve na struct que passamos.
+    let t = unsafe {
+        let agora = libc::time(std::ptr::null_mut());
+        let mut t: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&agora, &mut t);
+        t
+    };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        t.tm_year + 1900,
+        t.tm_mon + 1,
+        t.tm_mday,
+        t.tm_hour,
+        t.tm_min,
+        t.tm_sec
+    )
+}
+
 pub fn escrever(msg: &str) {
+    let linha = format!("{} {msg}", agora());
+    #[cfg(not(windows))]
+    eprintln!("{linha}");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(caminho()) {
-        let _ = writeln!(f, "{} {msg}", agora());
+        let _ = writeln!(f, "{linha}");
     }
 }
 

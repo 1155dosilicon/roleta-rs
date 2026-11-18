@@ -1,4 +1,5 @@
-//! Roleta de opções (menu radial) acionada pelo botão lateral do mouse - Windows.
+//! Roleta de opções (menu radial) acionada pelo botão lateral do mouse.
+//! Windows e Linux (X11).
 //!
 //! Como usar:
 //!   - SEGURE o botão lateral -> a roleta aparece em volta do cursor.
@@ -7,62 +8,67 @@
 //!   - Ou dê um CLIQUE rápido no botão lateral -> a roleta fica aberta;
 //!     clique com o botão esquerdo na opção. Botão direito = cancelar.
 //!
-//! As opções ficam em %APPDATA%\Roleta\roleta_config.json (criado na 1ª execução).
-//! Instalado como C:\Program Files\Roleta\Roleta.exe, iniciado no logon por uma
-//! tarefa agendada com privilégio de administrador (o hook do mouse funciona
-//! até em cima do Gerenciador de Tarefas). Os programas que a roleta abre rodam
-//! como usuário normal. Erros vão para %APPDATA%\Roleta\roleta.log.
+//! Windows: opções em %APPDATA%\Roleta\roleta_config.json, log em
+//! %APPDATA%\Roleta\roleta.log. Instalado como C:\Program Files\Roleta\Roleta.exe,
+//! iniciado no logon por uma tarefa agendada com privilégio de administrador
+//! (o hook do mouse funciona até em cima do Gerenciador de Tarefas). Os
+//! programas que a roleta abre rodam como usuário normal.
+//!
+//! Linux: opções em ~/.config/roleta/roleta_config.json, log em
+//! ~/.local/state/roleta/roleta.log. Instalado em ~/.local/bin/roleta e
+//! iniciado com a sessão (~/.config/autostart/roleta.desktop).
 //!
 //! Argumentos:
-//!   --teste-usuario arq.txt   (usado pelo instalador)
 //!   --previa pasta            salva imagens PNG do visual e sai
-//!   --teste                   roda ao lado da roleta instalada (outro mutex)
+//!   --teste                   roda ao lado da roleta instalada (outra trava)
+//!   --teste-usuario arq.txt   (Windows, usado pelo instalador)
 
-#![windows_subsystem = "windows"]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod acoes;
 mod config;
 mod desenho;
-mod hook;
-mod janela;
 mod log;
+mod roleta;
 
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS};
-use windows_sys::Win32::System::Threading::CreateMutexW;
-use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+#[cfg_attr(windows, path = "windows/mod.rs")]
+#[cfg_attr(target_os = "linux", path = "linux/mod.rs")]
+mod plataforma;
+
+#[cfg(not(any(windows, target_os = "linux")))]
+compile_error!("a roleta só funciona no Windows e no Linux (X11)");
 
 fn main() {
     std::panic::set_hook(Box::new(|info| log::escrever(&format!("ERRO FATAL: {info}"))));
     let args: Vec<String> = std::env::args().collect();
 
+    #[cfg(windows)]
     if args.len() == 3 && args[1] == "--teste-usuario" {
-        acoes::teste_usuario(&args[2]);
+        plataforma::acoes::teste_usuario(&args[2]);
         return;
     }
     if args.len() == 3 && args[1] == "--previa" {
-        janela::previa(&args[2]);
+        roleta::previa(&args[2]);
         return;
     }
     let teste = args.iter().any(|a| a == "--teste");
 
-    unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-
-    // Instância única: evita duas roletas (ex.: inicialização + abrir na mão).
-    let nome = acoes::wide(if teste { r"Local\RoletaMouseTeste" } else { r"Local\RoletaMouse" });
-    let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, nome.as_ptr()) };
-    let erro = unsafe { GetLastError() };
-    // já existe, ou existe mas foi criado por uma roleta de administrador
-    if mutex.is_null() || erro == ERROR_ALREADY_EXISTS || erro == ERROR_ACCESS_DENIED {
+    plataforma::preparar_processo();
+    let Some(trava) = plataforma::instancia_unica(teste) else {
         return;
-    }
+    };
 
     log::inicio();
     let cfg = config::carregar();
-    let reiniciar = janela::rodar(cfg);
+    let reiniciar = plataforma::rodar(cfg);
 
-    unsafe { CloseHandle(mutex) };
-    if reiniciar {
-        if let Ok(exe) = std::env::current_exe() {
+    drop(trava);
+    if reiniciar
+        && let Ok(exe) = std::env::current_exe() {
+            // Linux: se o binário foi trocado (reinstalação), o link vem com " (deleted)"
+            let exe = match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+                Some(s) => std::path::PathBuf::from(s),
+                None => exe,
+            };
             let mut c = std::process::Command::new(exe);
             if teste {
                 c.arg("--teste");
@@ -71,5 +77,4 @@ fn main() {
                 log::escrever(&format!("Não deu para reiniciar: {e}"));
             }
         }
-    }
 }

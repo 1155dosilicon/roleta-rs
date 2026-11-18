@@ -19,9 +19,7 @@ use crate::log;
 pub fn preparar_processo() {
     limpar_ambiente_claude();
     let casa = pasta_usuario();
-    let atual: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_default();
+    let atual: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
     let mut novo: Vec<PathBuf> = [".local/bin", ".cargo/bin", ".bun/bin"]
         .iter()
         .map(|d| casa.join(d))
@@ -63,10 +61,17 @@ fn limpar_ambiente_claude() {
 pub struct Instancia(#[allow(dead_code)] File);
 
 pub fn instancia_unica(teste: bool) -> Option<Instancia> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let p = dir.join(if teste { "roleta-teste.lock" } else { "roleta.lock" });
+    let nome = if teste { "roleta-teste" } else { "roleta" };
+    let p = match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
+        Some(d) => d.join(format!("{nome}.lock")),
+        // o /tmp é de todos: sem o UID no nome, a trava de um usuário
+        // impediria a roleta de outro
+        None => {
+            // SAFETY: getuid não tem pré-condições e nunca falha.
+            let uid = unsafe { libc::getuid() };
+            std::env::temp_dir().join(format!("{nome}-{uid}.lock"))
+        }
+    };
     let f = match OpenOptions::new().create(true).truncate(false).write(true).open(&p) {
         Ok(f) => f,
         Err(e) => {

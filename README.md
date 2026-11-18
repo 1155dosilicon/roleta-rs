@@ -23,13 +23,13 @@ Menu radial (roleta de opções) para **Windows** e **Linux (X11)**, acionado pe
 - **Ícone na bandeja** com menu para editar as opções, reiniciar (aplica as mudanças) e sair
 - **Instância única**: não abre duas roletas ao mesmo tempo (mutex no Windows, `flock` no Linux)
 - **Zero dependências em runtime**: um único executável (~3 MB no Windows, ~5 MB no Linux), sem .NET, sem Python, sem instalador de terceiros; no Linux fala direto com o X11, sem libX11/GTK
-- **Log de erros** em `%APPDATA%\Roleta\roleta.log` (Windows) ou `~/.local/state/roleta/roleta.log` (Linux)
+- **Log de erros** em `%APPDATA%\Roleta\roleta.log` (Windows) ou `~/.local/state/roleta/roleta.log` (Linux), incluindo avisos da configuração (campo ou valor desconhecido, raio fora do limite). Um erro na configuração nunca apaga o seu arquivo: a roleta usa o padrão e deixa o arquivo como está
 
 ## ⚙️ Requisitos
 
 - **Windows** 10/11 com PowerShell 5.1+ (já vem no Windows)
 - **Linux** com sessão **X11** (XFCE, MATE, Cinnamon, KDE no X11...) e um compositor ligado, para a transparência (o do xfwm4 já vem ligado). Wayland não é suportado: lá um programa não pode capturar o botão do mouse globalmente
-- [Rust](https://www.rust-lang.org/tools/install) (para compilar)
+- [Rust](https://www.rust-lang.org/tools/install) 1.89 ou mais novo (para compilar)
 
 ## 🚀 Instalação
 
@@ -175,7 +175,7 @@ O "Claude" abre o terminal na pasta `~/ai` já rodando o [Claude Code](https://c
 |--------|---------|-----------|
 | `abrir` | Caminho de arquivo/pasta, executável no `PATH`, site (`https://...`) ou URI (`ms-screenclip:`, `mailto:`...) | Abre com o programa padrão (Windows: `ShellExecute`; Linux: `xdg-open`, ou roda o programa se for um nome no `PATH`). No Linux, `~` vira a pasta pessoal |
 | `comando` | Linha de comando (ex.: `wt -d "C:\proj"` ou `kitty -e htop`) | Windows: `cmd /c`, sem janela. Linux: `sh -c` (aceita `~`, `&&`, aspas) |
-| `teclas` | Atalho no formato `<ctrl>+<shift>+s`, `<win>+<m>`, `f5`, `media_play_pause`... | Envia as teclas (pressiona e solta em ordem). Linux: via XTest; `<win>` = Super |
+| `teclas` | Atalho no formato `<ctrl>+<shift>+s`, `<win>+<m>`, `f5`, `media_play_pause`... | Envia as teclas (pressiona e solta em ordem). A tecla `+` é escrita `<ctrl>++`. Se um caractere precisa de Shift ou AltGr no layout atual (ex.: `?` no americano), a roleta aperta junto. Linux: via XTest; `<win>` = Super |
 | `texto` | Texto qualquer | Digita como teclado Unicode (no Linux, letras que não existem no teclado, como `ã` no layout americano, são digitadas emprestando uma tecla livre por um instante) |
 | `sair` | (ignorado) | Encerra a roleta |
 
@@ -215,7 +215,8 @@ flowchart LR
 | Módulo | Responsabilidade |
 |--------|------------------|
 | `src/main.rs` | Ponto de entrada: instância única, argumentos (`--teste`, `--previa`, `--teste-usuario`), reinício |
-| `src/config.rs` | Carrega `roleta_config.json` (serde), cria o padrão de cada sistema na 1ª execução |
+| `src/config.rs` | Carrega `roleta_config.json` (serde) para tipos próprios (`Botao`, `Acao`), avisa no log o que não reconhece, cria o padrão de cada sistema na 1ª execução |
+| `src/atalho.rs` | Lê o texto dos atalhos (`<ctrl>+<shift>+s`), igual nos dois sistemas |
 | `src/roleta.rs` | Estado da roleta: abrir/soltar/modo clique, opção sob o cursor, animação, prévia em PNG |
 | `src/desenho.rs` | Desenha a roleta: fatias em degradê, arcos, ícones SVG via `resvg`, quebra de texto |
 | `src/log.rs` | Log simples com data e hora |
@@ -228,7 +229,7 @@ flowchart LR
 
 **Segurança (Windows)**: a roleta roda como administrador para o hook funcionar em janelas elevadas, mas ao abrir um programa ela cria o processo tendo o **Explorer como pai** (que roda como usuário normal), para que o Chrome, o terminal etc. **não** herdem privilégios de admin.
 
-**Animação**: no Windows o hook roda em thread `THREAD_PRIORITY_HIGHEST` para o mouse não "engasgar"; nos dois sistemas a roleta anima a cada 10 ms enquanto está na tela (veja `roleta.rs::tick`) e não gasta nada parada.
+**Animação**: no Windows o hook roda em thread `THREAD_PRIORITY_HIGHEST` para o mouse não "engasgar"; nos dois sistemas a roleta anima a cada 10 ms enquanto está na tela (veja `roleta.rs::tick`), mas só redesenha quando algo muda: aberta e parada, ou escondida, não gasta CPU.
 
 **Linux**: enquanto o botão lateral está apertado, o X11 manda os eventos do mouse só para a roleta (grab passivo), por isso o navegador não volta a página. Sem compositor a janela aparece com fundo preto em vez de transparente.
 
@@ -237,11 +238,13 @@ flowchart LR
 ```sh
 cargo build          # compila (otimiza dependências mesmo em debug)
 cargo run            # roda direto, sem instalar
+cargo test           # testes (geometria, configuração, atalhos)
 cargo build --release
 ```
 
 - `build.rs` e `winresource` embutem o ícone `.ico` e o manifesto no `.exe` (só quando o alvo é Windows)
 - Do Linux dá para compilar o `.exe`: `rustup target add x86_64-pc-windows-gnu`, instalar o `gcc-mingw-w64-x86-64` e `cargo build --release --target x86_64-pc-windows-gnu`
+- Só checar o código do Windows (`cargo clippy --target x86_64-pc-windows-gnu`) precisa apenas do `x86_64-w64-mingw32-windres`, que pode ser um link para o `llvm-windres`
 - `examples/gerar_icone.rs` regenera o `.ico` a partir dos SVGs em `assets/` (`cargo run --release --example gerar_icone`)
 - Pré-visualização de telas: `cargo run -- --previa pasta`
 

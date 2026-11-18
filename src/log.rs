@@ -23,20 +23,19 @@ fn caminho() -> PathBuf {
 #[cfg(windows)]
 fn agora() -> String {
     use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+    // SAFETY: SYSTEMTIME é POD (zero é válido) e GetLocalTime só escreve nela.
     let t = unsafe {
         let mut t = std::mem::zeroed();
         GetLocalTime(&mut t);
         t
     };
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
-    )
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond)
 }
 
 #[cfg(not(windows))]
 fn agora() -> String {
-    // SAFETY: localtime_r só escreve na struct que passamos.
+    // SAFETY: time aceita ponteiro nulo; tm é POD (zero é válido) e o
+    // localtime_r só escreve nela.
     let t = unsafe {
         let agora = libc::time(std::ptr::null_mut());
         let mut t: libc::tm = std::mem::zeroed();
@@ -58,6 +57,10 @@ pub fn escrever(msg: &str) {
     let linha = format!("{} {msg}", agora());
     #[cfg(not(windows))]
     eprintln!("{linha}");
+    // os testes não mexem no log de verdade
+    if cfg!(test) {
+        return;
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(caminho()) {
         let _ = writeln!(f, "{linha}");
     }

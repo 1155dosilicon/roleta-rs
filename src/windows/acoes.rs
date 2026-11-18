@@ -11,19 +11,19 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList, OpenProcess,
-    UpdateProcThreadAttribute, CREATE_NO_WINDOW, EXTENDED_STARTUPINFO_PRESENT,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_CREATE_PROCESS, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, STARTUPINFOEXW,
+    CREATE_NO_WINDOW, CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcess, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+    PROCESS_CREATE_PROCESS, PROCESS_INFORMATION, STARTUPINFOEXW, UpdateProcThreadAttribute,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, VkKeyScanW, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput,
+    VkKeyScanW,
 };
 use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId, SW_SHOWNORMAL};
 
-use crate::config::{pasta_usuario, Opcao};
+use crate::atalho;
+use crate::config::{Acao, Opcao, pasta_usuario};
 use crate::log;
 
 pub fn wide(s: &str) -> Vec<u16> {
@@ -31,6 +31,7 @@ pub fn wide(s: &str) -> Vec<u16> {
 }
 
 pub fn eh_admin() -> bool {
+    // SAFETY: sem argumentos nem pré-condições.
     unsafe { IsUserAnAdmin() != 0 }
 }
 
@@ -40,71 +41,115 @@ fn cmd_exe() -> PathBuf {
 }
 
 fn erro_win(onde: &str) -> String {
+    // SAFETY: sem pré-condições; lê o erro da última chamada desta thread.
     format!("{onde} falhou (erro {})", unsafe { GetLastError() })
 }
 
-fn rodar_como_usuario(linha: &str) -> Result<(), String> {
-    unsafe {
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(GetShellWindow(), &mut pid);
-        if pid == 0 {
-            return Err("Explorer não encontrado".into());
-        }
-        let hpai = OpenProcess(PROCESS_CREATE_PROCESS, 0, pid);
-        if hpai.is_null() {
-            return Err(erro_win("OpenProcess"));
-        }
-        let mut tam = 0usize;
-        InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut tam);
-        let mut buf = vec![0u8; tam];
-        let lista = buf.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST;
-        let r = (|| {
-            if InitializeProcThreadAttributeList(lista, 1, 0, &mut tam) == 0 {
-                return Err(erro_win("InitializeProcThreadAttributeList"));
-            }
-            let mut hp: HANDLE = hpai;
-            let ok = UpdateProcThreadAttribute(
-                lista,
-                0,
-                PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize,
-                &mut hp as *mut HANDLE as *const _,
-                std::mem::size_of::<HANDLE>(),
-                null_mut(),
-                null(),
-            );
-            if ok == 0 {
-                DeleteProcThreadAttributeList(lista);
-                return Err(erro_win("UpdateProcThreadAttribute"));
-            }
-            let mut si: STARTUPINFOEXW = std::mem::zeroed();
-            si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-            si.lpAttributeList = lista;
-            let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-            let mut cmd = wide(linha);
-            let dir = wide(&pasta_usuario().to_string_lossy());
-            let ok = CreateProcessW(
-                null(),
-                cmd.as_mut_ptr(),
-                null(),
-                null(),
-                0,
-                EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
-                null(),
-                dir.as_ptr(),
-                &si.StartupInfo,
-                &mut pi,
-            );
-            DeleteProcThreadAttributeList(lista);
-            if ok == 0 {
-                return Err(erro_win("CreateProcessW"));
-            }
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            Ok(())
-        })();
-        CloseHandle(hpai);
-        r
+/// Handle fechado no Drop.
+struct Handle(HANDLE);
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        // SAFETY: handle válido, aberto por nós e fechado só aqui.
+        unsafe { CloseHandle(self.0) };
     }
+}
+
+/// Lista de atributos de processo com um atributo só (o processo pai).
+struct ListaAtributos {
+    // Vec<usize> em vez de Vec<u8>: a lista guarda ponteiros e precisa de
+    // alinhamento de ponteiro
+    _buf: Vec<usize>,
+    lista: LPPROC_THREAD_ATTRIBUTE_LIST,
+    /// O UpdateProcThreadAttribute guarda o endereço do handle, que precisa
+    /// existir até o CreateProcessW: fica numa Box (endereço fixo).
+    _pai: Box<HANDLE>,
+}
+
+impl ListaAtributos {
+    fn com_pai(pai: HANDLE) -> Result<Self, String> {
+        let mut tam = 0usize;
+        // SAFETY: com lista nula a chamada só informa o tamanho necessário.
+        unsafe { InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut tam) };
+        let mut buf = vec![0usize; tam.div_ceil(size_of::<usize>())];
+        let lista = buf.as_mut_ptr().cast();
+        // SAFETY: `buf` tem pelo menos `tam` bytes, alinhado a ponteiro.
+        if unsafe { InitializeProcThreadAttributeList(lista, 1, 0, &mut tam) } == 0 {
+            return Err(erro_win("InitializeProcThreadAttributeList"));
+        }
+        let pai = Box::new(pai);
+        let ok = {
+            // SAFETY: lista inicializada; o valor aponta para um HANDLE que vive
+            // (na Box) tanto quanto a lista.
+            unsafe {
+                UpdateProcThreadAttribute(
+                    lista,
+                    0,
+                    PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize,
+                    std::ptr::from_ref::<HANDLE>(&pai).cast(),
+                    size_of::<HANDLE>(),
+                    null_mut(),
+                    null(),
+                )
+            }
+        };
+        let l = ListaAtributos { _buf: buf, lista, _pai: pai };
+        if ok == 0 {
+            return Err(erro_win("UpdateProcThreadAttribute"));
+        }
+        Ok(l)
+    }
+}
+
+impl Drop for ListaAtributos {
+    fn drop(&mut self) {
+        // SAFETY: a lista foi inicializada no com_pai e o buffer ainda existe.
+        unsafe { DeleteProcThreadAttributeList(self.lista) };
+    }
+}
+
+fn rodar_como_usuario(linha: &str) -> Result<(), String> {
+    let mut pid = 0u32;
+    // SAFETY: `pid` é um u32 válido para escrita; janela nula = pid fica 0.
+    unsafe { GetWindowThreadProcessId(GetShellWindow(), &mut pid) };
+    if pid == 0 {
+        return Err("Explorer não encontrado".into());
+    }
+    // SAFETY: sem ponteiros; falha devolve nulo.
+    let pai = unsafe { OpenProcess(PROCESS_CREATE_PROCESS, 0, pid) };
+    if pai.is_null() {
+        return Err(erro_win("OpenProcess"));
+    }
+    let pai = Handle(pai);
+    let atributos = ListaAtributos::com_pai(pai.0)?;
+
+    // SAFETY: STARTUPINFOEXW e PROCESS_INFORMATION são POD (zero é válido).
+    let (mut si, mut pi): (STARTUPINFOEXW, PROCESS_INFORMATION) = unsafe { std::mem::zeroed() };
+    si.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+    si.lpAttributeList = atributos.lista;
+    let mut cmd = wide(linha);
+    let dir = wide(&pasta_usuario().to_string_lossy());
+    // SAFETY: `cmd` é gravável e termina em 0 (o CreateProcessW pode mexer
+    // nele); `dir` termina em 0; `si` e `atributos` vivem até o fim da chamada.
+    let ok = unsafe {
+        CreateProcessW(
+            null(),
+            cmd.as_mut_ptr(),
+            null(),
+            null(),
+            0,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+            null(),
+            dir.as_ptr(),
+            &si.StartupInfo,
+            &mut pi,
+        )
+    };
+    if ok == 0 {
+        return Err(erro_win("CreateProcessW"));
+    }
+    drop((Handle(pi.hThread), Handle(pi.hProcess)));
+    Ok(())
 }
 
 /// Abre arquivo/pasta/site/programa sem herdar o modo administrador.
@@ -118,6 +163,7 @@ pub fn abrir_como_usuario(alvo: &str) {
     }
     let op = wide("open");
     let arq = wide(alvo);
+    // SAFETY: as strings terminam em 0 e vivem até o fim da chamada.
     let r = unsafe { ShellExecuteW(null_mut(), op.as_ptr(), arq.as_ptr(), null(), null(), SW_SHOWNORMAL) };
     if (r as isize) <= 32 {
         log::escrever(&format!("Não deu para abrir {alvo:?} (código {})", r as isize));
@@ -153,6 +199,10 @@ pub fn teste_usuario(saida: &str) {
 
 // ---------------------------------------------------------------- teclado
 
+const VK_SHIFT: u16 = 0x10;
+const VK_CONTROL: u16 = 0x11;
+const VK_MENU: u16 = 0x12; // Alt
+
 fn tecla(vk: u16, solta: bool) -> INPUT {
     let estendida = matches!(vk, 0x21..=0x2E | 0x5B | 0x5C | 0x5D | 0xA3 | 0xA5);
     let mut flags = 0;
@@ -164,9 +214,7 @@ fn tecla(vk: u16, solta: bool) -> INPUT {
     }
     INPUT {
         r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
-        },
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
     }
 }
 
@@ -174,9 +222,7 @@ fn unicode(u: u16, solta: bool) -> INPUT {
     let flags = KEYEVENTF_UNICODE | if solta { KEYEVENTF_KEYUP } else { 0 };
     INPUT {
         r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT { wVk: 0, wScan: u, dwFlags: flags, time: 0, dwExtraInfo: 0 },
-        },
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: 0, wScan: u, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
     }
 }
 
@@ -184,20 +230,37 @@ fn enviar(entradas: &[INPUT]) {
     if entradas.is_empty() {
         return;
     }
-    unsafe {
-        SendInput(entradas.len() as u32, entradas.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+    // SAFETY: o ponteiro e o tamanho vêm de um slice válido de INPUT.
+    let n = unsafe { SendInput(entradas.len() as u32, entradas.as_ptr(), size_of::<INPUT>() as i32) };
+    if n as usize != entradas.len() {
+        // ex.: a janela ativa é de administrador e a roleta não (UIPI)
+        log::escrever(&format!("SendInput mandou {n} de {} eventos", entradas.len()));
     }
 }
 
-/// Nome de tecla no formato do pynput ("ctrl", "shift", "f5", "a"...) -> código virtual.
-fn codigo_tecla(nome: &str) -> Option<u16> {
-    let n = nome.trim().trim_start_matches('<').trim_end_matches('>').to_lowercase();
-    let vk = match n.as_str() {
-        "ctrl" | "ctrl_l" | "control" => 0x11,
+/// Modificadores que um caractere precisa no layout atual (bits do
+/// VkKeyScanW: 1 = Shift, 2 = Ctrl, 4 = Alt; Ctrl+Alt = AltGr).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Mods(u8);
+
+impl Mods {
+    fn vks(self) -> impl Iterator<Item = u16> {
+        [(1, VK_SHIFT), (2, VK_CONTROL), (4, VK_MENU)]
+            .into_iter()
+            .filter(move |&(b, _)| self.0 & b != 0)
+            .map(|(_, v)| v)
+    }
+}
+
+/// Nome de tecla (já normalizado por [`atalho::teclas`]) -> código virtual e
+/// modificadores que ela precisa (ex.: "?" no layout americano = Shift + "/").
+fn codigo_tecla(n: &str) -> Option<(u16, Mods)> {
+    let vk = match n {
+        "ctrl" | "ctrl_l" | "control" => VK_CONTROL,
         "ctrl_r" => 0xA3,
-        "shift" | "shift_l" => 0x10,
+        "shift" | "shift_l" => VK_SHIFT,
         "shift_r" => 0xA1,
-        "alt" | "alt_l" => 0x12,
+        "alt" | "alt_l" => VK_MENU,
         "alt_r" | "alt_gr" => 0xA5,
         "cmd" | "cmd_l" | "win" | "super" => 0x5B,
         "cmd_r" => 0x5C,
@@ -228,40 +291,51 @@ fn codigo_tecla(nome: &str) -> Option<u16> {
         "media_volume_down" => 0xAE,
         "media_volume_mute" => 0xAD,
         _ => {
-            if let Some(f) = n.strip_prefix('f').and_then(|x| x.parse::<u16>().ok()) {
-                if (1..=24).contains(&f) {
-                    return Some(0x70 + f - 1);
-                }
+            if let Some(f) = atalho::numero_f(n) {
+                return Some((0x70 + u16::from(f) - 1, Mods::default()));
             }
-            let mut cs = n.chars();
-            let c = cs.next()?;
-            if cs.next().is_some() {
-                return None;
-            }
+            let c = atalho::caractere(n)?;
             if c.is_ascii_alphanumeric() {
-                return Some(c.to_ascii_uppercase() as u16);
+                return Some((c.to_ascii_uppercase() as u16, Mods::default()));
             }
-            let r = unsafe { VkKeyScanW(c as u16) };
+            let mut u = [0u16; 2];
+            let [u] = c.encode_utf16(&mut u) else { return None };
+            // SAFETY: sem ponteiros; devolve -1 se o caractere não existe no layout.
+            let r = unsafe { VkKeyScanW(*u) };
             if r == -1 {
                 return None;
             }
-            (r as u16) & 0xFF
+            let [vk, mods] = r.to_le_bytes();
+            return Some((u16::from(vk), Mods(mods & 0b111)));
         }
     };
-    Some(vk)
+    Some((vk, Mods::default()))
+}
+
+fn eh_modificador(vk: u16, m: u16) -> bool {
+    let (l, r) = match m {
+        VK_SHIFT => (0xA0, 0xA1),
+        VK_CONTROL => (0xA2, 0xA3),
+        _ => (0xA4, 0xA5),
+    };
+    vk == m || vk == l || vk == r
+}
+
+/// Teclas na ordem de apertar: os modificadores que algum caractere precisa
+/// e que o atalho não tem vêm primeiro.
+fn sequencia(teclas: &[(u16, Mods)]) -> Vec<u16> {
+    let todos = Mods(teclas.iter().fold(0, |a, &(_, m)| a | m.0));
+    let mut vks: Vec<u16> = todos.vks().filter(|&m| !teclas.iter().any(|&(vk, _)| eh_modificador(vk, m))).collect();
+    vks.extend(teclas.iter().map(|&(vk, _)| vk));
+    vks
 }
 
 fn atalho(valor: &str) -> Result<(), String> {
-    // "<ctrl>+<shift>+s" (formato do pynput). "+" sozinho no fim = tecla "+".
-    let mut partes: Vec<&str> = valor.split('+').collect();
-    if valor.ends_with("++") {
-        partes.truncate(partes.len().saturating_sub(2));
-        partes.push("+");
-    }
-    let mut vks = Vec::new();
-    for p in partes.iter().filter(|p| !p.trim().is_empty()) {
-        vks.push(codigo_tecla(p).ok_or_else(|| format!("tecla desconhecida: {p:?}"))?);
-    }
+    let teclas = atalho::teclas(valor)?
+        .iter()
+        .map(|n| codigo_tecla(n).ok_or_else(|| format!("tecla desconhecida: {n:?}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let vks = sequencia(&teclas);
     let mut ent: Vec<INPUT> = vks.iter().map(|&v| tecla(v, false)).collect();
     ent.extend(vks.iter().rev().map(|&v| tecla(v, true)));
     enviar(&ent);
@@ -269,7 +343,7 @@ fn atalho(valor: &str) -> Result<(), String> {
 }
 
 fn digitar(texto: &str) {
-    let mut ent = Vec::new();
+    let mut ent = Vec::with_capacity(texto.len() * 2);
     for u in texto.encode_utf16() {
         ent.push(unicode(u, false));
         ent.push(unicode(u, true));
@@ -279,25 +353,57 @@ fn digitar(texto: &str) {
 
 /// Executa a opção. Devolve `true` se a opção pede para sair da roleta.
 pub fn executar(op: &Opcao) -> bool {
-    let r = match op.tipo.as_str() {
-        "abrir" => {
-            abrir_como_usuario(&op.valor);
+    let r = match &op.acao {
+        Acao::Abrir(v) => {
+            abrir_como_usuario(v);
             Ok(())
         }
-        "comando" => {
-            comando_como_usuario(&op.valor);
+        Acao::Comando(v) => {
+            comando_como_usuario(v);
             Ok(())
         }
-        "teclas" => atalho(&op.valor),
-        "texto" => {
-            digitar(&op.valor);
+        Acao::Teclas(v) => atalho(v),
+        Acao::Texto(v) => {
+            digitar(v);
             Ok(())
         }
-        "sair" => return true,
-        t => Err(format!("tipo desconhecido: {t:?}")),
+        Acao::Sair => return true,
+        Acao::Desconhecida(t) => Err(format!("tipo desconhecido: {t:?}")),
     };
     if let Err(e) = r {
         log::escrever(&format!("Erro ao executar {:?}: {e}", op.nome));
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SEM: Mods = Mods(0);
+
+    #[test]
+    fn modificador_que_falta_vem_antes() {
+        // "<ctrl>+?" no layout americano: ? = Shift + VK_OEM_2 (0xBF)
+        assert_eq!(sequencia(&[(VK_CONTROL, SEM), (0xBF, Mods(1))]), [VK_SHIFT, VK_CONTROL, 0xBF]);
+    }
+
+    #[test]
+    fn modificador_que_ja_tem_nao_repete() {
+        assert_eq!(sequencia(&[(VK_CONTROL, SEM), (0xA1, SEM), (0xBF, Mods(1))]), [VK_CONTROL, 0xA1, 0xBF]);
+        assert_eq!(sequencia(&[(VK_CONTROL, SEM), (0x53, SEM)]), [VK_CONTROL, 0x53]);
+    }
+
+    #[test]
+    fn altgr_vira_ctrl_alt() {
+        assert_eq!(sequencia(&[(0x51, Mods(6))]), [VK_CONTROL, VK_MENU, 0x51]);
+    }
+
+    #[test]
+    fn teclas_com_nome() {
+        assert_eq!(codigo_tecla("ctrl"), Some((VK_CONTROL, SEM)));
+        assert_eq!(codigo_tecla("f5"), Some((0x74, SEM)));
+        assert_eq!(codigo_tecla("s"), Some((0x53, SEM)));
+        assert_eq!(codigo_tecla("nada"), None);
+    }
 }

@@ -25,6 +25,7 @@
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod atalho;
 mod config;
 mod desenho;
 mod log;
@@ -62,19 +63,18 @@ fn main() {
     let reiniciar = plataforma::rodar(cfg);
 
     drop(trava);
-    if reiniciar
-        && let Ok(exe) = std::env::current_exe() {
-            // Linux: se o binário foi trocado (reinstalação), o link vem com " (deleted)"
-            let exe = match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
-                Some(s) => std::path::PathBuf::from(s),
-                None => exe,
-            };
-            let mut c = std::process::Command::new(exe);
-            if teste {
-                c.arg("--teste");
-            }
-            if let Err(e) = c.spawn() {
-                log::escrever(&format!("Não deu para reiniciar: {e}"));
-            }
+    if reiniciar && let Ok(exe) = std::env::current_exe() {
+        // Linux: se o binário foi trocado (reinstalação), o link vem com " (deleted)"
+        let exe = match exe.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+            Some(s) => std::path::PathBuf::from(s),
+            None => exe,
+        };
+        let mut c = std::process::Command::new(exe);
+        if teste {
+            c.arg("--teste");
         }
+        if let Err(e) = c.spawn() {
+            log::escrever(&format!("Não deu para reiniciar: {e}"));
+        }
+    }
 }

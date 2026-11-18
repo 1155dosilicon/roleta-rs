@@ -3,8 +3,8 @@
 //! a roleta) e avisa a janela de controle por PostMessage.
 
 use std::ffi::c_void;
-use std::ptr::null_mut;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU8, Ordering::Relaxed};
+use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicU32, Ordering::Relaxed};
 
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -12,12 +12,12 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostMessageW, PostThreadMessageW,
-    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION, MSG, MSLLHOOKSTRUCT,
-    WH_MOUSE_LL, WM_APP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_XBUTTONDOWN, WM_XBUTTONUP,
+    CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, MSG, MSLLHOOKSTRUCT, PostMessageW, PostThreadMessageW,
+    SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WM_APP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
 };
 
+use crate::config::Botao;
 use crate::log;
 
 /// Mensagem enviada para a janela de controle; wParam = um dos EV_*.
@@ -38,13 +38,18 @@ static ENGOLIR_L: AtomicBool = AtomicBool::new(false);
 static ENGOLIR_R: AtomicBool = AtomicBool::new(false);
 
 fn avisar(ev: usize) {
+    // SAFETY: PostMessageW só copia os valores para a fila; um HWND inválido
+    // faz a chamada falhar, sem comportamento indefinido.
     unsafe {
         PostMessageW(ALVO.load(Relaxed), WM_ROLETA, ev, 0);
     }
 }
 
+/// Chamado pelo Windows na thread do hook a cada evento do mouse.
 unsafe extern "system" fn proc_mouse(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
+        // SAFETY: com HC_ACTION, lparam aponta para um MSLLHOOKSTRUCT válido
+        // durante esta chamada (contrato do WH_MOUSE_LL).
         let info = unsafe { &*(lparam as *const MSLLHOOKSTRUCT) };
         let msg = wparam as u32;
         match msg {
@@ -71,40 +76,51 @@ unsafe extern "system" fn proc_mouse(code: i32, wparam: WPARAM, lparam: LPARAM) 
             _ => {}
         }
     }
+    // SAFETY: repassa os mesmos argumentos recebidos, como o Windows pede.
     unsafe { CallNextHookEx(null_mut(), code, wparam, lparam) }
 }
 
-pub fn iniciar(alvo: *mut c_void, botao: &str) {
+pub fn iniciar(alvo: *mut c_void, botao: Botao) {
     ALVO.store(alvo, Relaxed);
     ACEITOS.store(
         match botao {
-            "x2" => 0b10,
-            "ambos" => 0b11,
-            _ => 0b01,
+            Botao::X1 => 0b01,
+            Botao::X2 => 0b10,
+            Botao::Ambos => 0b11,
         },
         Relaxed,
     );
-    std::thread::spawn(|| unsafe {
-        THREAD.store(GetCurrentThreadId(), Relaxed);
-        // o hook tem que responder rápido, senão o mouse "engasga"
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-        let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(proc_mouse), GetModuleHandleW(std::ptr::null()), 0);
+    std::thread::spawn(|| {
+        // SAFETY: funções sem ponteiros; GetCurrentThread é um pseudo-handle.
+        unsafe {
+            THREAD.store(GetCurrentThreadId(), Relaxed);
+            // o hook tem que responder rápido, senão o mouse "engasga"
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        }
+        // SAFETY: proc_mouse tem a assinatura de HOOKPROC e vive o programa
+        // todo; o módulo é o próprio executável.
+        let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(proc_mouse), GetModuleHandleW(null()), 0) };
         if hook.is_null() {
             log::escrever("ERRO: não deu para instalar o hook do mouse");
             return;
         }
-        let mut msg: MSG = std::mem::zeroed();
-        while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        // o hook só funciona enquanto esta thread processa mensagens
+        // SAFETY: MSG é POD (zero é válido) e só é usado nesta thread.
+        unsafe {
+            let mut msg: MSG = std::mem::zeroed();
+            while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            UnhookWindowsHookEx(hook);
         }
-        UnhookWindowsHookEx(hook);
     });
 }
 
 pub fn parar() {
     let t = THREAD.load(Relaxed);
     if t != 0 {
+        // SAFETY: só posta uma mensagem; id de thread inválido = falha simples.
         unsafe {
             PostThreadMessageW(t, WM_QUIT, 0, 0);
         }

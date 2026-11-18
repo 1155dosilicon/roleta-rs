@@ -16,16 +16,16 @@ use std::time::Instant;
 
 use x11rb::connection::{Connection, RequestConnection as _};
 use x11rb::errors::ReplyOrIdError;
+use x11rb::protocol::Event;
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::shape::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::*;
-use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::{CURRENT_TIME, NONE};
 
 use super::{acoes, bandeja};
-use crate::config::{self, Config};
+use crate::config::{self, Botao, Config};
 use crate::log;
 use crate::roleta::{self, Roleta, Tick};
 
@@ -62,11 +62,11 @@ struct App {
     sair: bool,
 }
 
-fn botoes_de(botao: &str) -> Vec<u8> {
+fn botoes_de(botao: Botao) -> Vec<u8> {
     match botao {
-        "x2" => vec![9],
-        "ambos" => vec![8, 9],
-        _ => vec![8],
+        Botao::X1 => vec![8],
+        Botao::X2 => vec![9],
+        Botao::Ambos => vec![8, 9],
     }
 }
 
@@ -106,7 +106,8 @@ impl App {
 
         // nome, classe e tipo (o compositor trata como menu: sem moldura nem foco)
         let _ = conn.change_property8(PropMode::REPLACE, janela, AtomEnum::WM_NAME, AtomEnum::STRING, b"Roleta");
-        let _ = conn.change_property8(PropMode::REPLACE, janela, AtomEnum::WM_CLASS, AtomEnum::STRING, b"roleta\0Roleta\0");
+        let _ =
+            conn.change_property8(PropMode::REPLACE, janela, AtomEnum::WM_CLASS, AtomEnum::STRING, b"roleta\0Roleta\0");
         let tipo = atomo(&conn, "_NET_WM_WINDOW_TYPE").map_err(erro)?;
         let menu = atomo(&conn, "_NET_WM_WINDOW_TYPE_POPUP_MENU").map_err(erro)?;
         let _ = conn.change_property32(PropMode::REPLACE, janela, tipo, AtomEnum::ATOM, &[menu]);
@@ -116,7 +117,7 @@ impl App {
         let gc = conn.generate_id().map_err(|e| e.to_string())?;
         conn.create_gc(gc, janela, &CreateGCAux::new()).map_err(|e| e.to_string())?;
 
-        let botoes = botoes_de(&cfg.botao);
+        let botoes = botoes_de(cfg.botao);
         for &b in &botoes {
             let r = conn
                 .grab_button(
@@ -142,7 +143,7 @@ impl App {
             conn,
             raiz,
             janela,
-            tela: (tela.width_in_pixels as i32, tela.height_in_pixels as i32),
+            tela: (i32::from(tela.width_in_pixels), i32::from(tela.height_in_pixels)),
             gc,
             lsb,
             botoes,
@@ -161,7 +162,7 @@ impl App {
     fn ponteiro(&mut self) -> (roleta::Ponto, u16) {
         match self.conn.query_pointer(self.raiz).map(|c| c.reply()) {
             Ok(Ok(r)) => {
-                self.ultimo_ponto = (r.root_x as i32, r.root_y as i32);
+                self.ultimo_ponto = (i32::from(r.root_x), i32::from(r.root_y));
                 (self.ultimo_ponto, u16::from(r.mask) & BOTOES)
             }
             _ => (self.ultimo_ponto, 0),
@@ -194,8 +195,8 @@ impl App {
             .monitors
             .iter()
             .map(|m| {
-                let (x, y) = (m.x as i32, m.y as i32);
-                (x, y, x + m.width as i32, y + m.height as i32)
+                let (x, y) = (i32::from(m.x), i32::from(m.y));
+                (x, y, x + i32::from(m.width), y + i32::from(m.height))
             })
             .collect();
         rets.iter()
@@ -329,7 +330,7 @@ impl App {
     }
 
     fn pintar(&mut self) {
-        let alfa = self.r.alfa() as u32;
+        let alfa = u32::from(self.r.alfa());
         let lado = self.r.lado();
         let pm = self.r.quadro();
         if pm.width() != lado || pm.height() != lado {
@@ -338,7 +339,7 @@ impl App {
         // RGBA pré-multiplicado (tiny-skia) -> pixel ARGB de 32 bits do X,
         // também pré-multiplicado, já com a opacidade geral da animação
         self.buf.resize(pm.data().len(), 0);
-        let m = |v: u8| ((v as u32 * alfa + 127) / 255) as u8;
+        let m = |v: u8| ((u32::from(v) * alfa + 127) / 255) as u8;
         for (d, s) in self.buf.as_chunks_mut::<4>().0.iter_mut().zip(pm.data().as_chunks::<4>().0) {
             let (r, g, b, a) = (m(s[0]), m(s[1]), m(s[2]), m(s[3]));
             if self.lsb {
@@ -354,7 +355,8 @@ impl App {
         for (i, faixa) in self.buf.chunks(por_vez * linha).enumerate() {
             let h = (faixa.len() / linha) as u16;
             let y = (i * por_vez) as i16;
-            let _ = self.conn.put_image(ImageFormat::Z_PIXMAP, self.janela, self.gc, lado as u16, h, 0, y, 0, 32, faixa);
+            let _ =
+                self.conn.put_image(ImageFormat::Z_PIXMAP, self.janela, self.gc, lado as u16, h, 0, y, 0, 32, faixa);
         }
         let _ = self.conn.flush();
     }
@@ -362,7 +364,7 @@ impl App {
     fn executar_pendente(&mut self) {
         let Some((_, i)) = self.acao.take() else { return };
         let Some(op) = self.r.opcao(i) else { return };
-        if acoes::executar(&op, &self.conn) {
+        if acoes::executar(op, &self.conn) {
             self.sair = true;
         }
     }
@@ -399,16 +401,18 @@ impl App {
 }
 
 fn ler_eventos(conn: Arc<RustConnection>, tx: Sender<Msg>) {
-    std::thread::spawn(move || loop {
-        match conn.wait_for_event() {
-            Ok(ev) => {
-                if tx.send(Msg::X(ev)).is_err() {
+    std::thread::spawn(move || {
+        loop {
+            match conn.wait_for_event() {
+                Ok(ev) => {
+                    if tx.send(Msg::X(ev)).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Msg::ErroX(e.to_string()));
                     break;
                 }
-            }
-            Err(e) => {
-                let _ = tx.send(Msg::ErroX(e.to_string()));
-                break;
             }
         }
     });
@@ -465,10 +469,10 @@ pub fn rodar(cfg: Config) -> bool {
     ler_eventos(conn, tx.clone());
     let _bandeja = bandeja::iniciar(tx);
 
-    let nomes = match app.r.cfg.botao.as_str() {
-        "x2" => "lateral da frente (X2, botão 9)",
-        "ambos" => "laterais (X1 e X2, botões 8 e 9)",
-        _ => "lateral de trás (X1, botão 8)",
+    let nomes = match app.r.cfg.botao {
+        Botao::X1 => "lateral de trás (X1, botão 8)",
+        Botao::X2 => "lateral da frente (X2, botão 9)",
+        Botao::Ambos => "laterais (X1 e X2, botões 8 e 9)",
     };
     log::escrever(&format!("Roleta ativa! Segure o botão {nomes}. (pronta em {} ms)", t0.elapsed().as_millis()));
 

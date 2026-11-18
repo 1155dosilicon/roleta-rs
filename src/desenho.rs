@@ -24,22 +24,12 @@ const ICONES: &[(&str, &str, &str)] = &[
 ];
 
 /// Códigos de glifo da versão antiga -> ícone novo equivalente.
-const LEGADO: &[(&str, &str)] = &[
-    ("E8B7", "pasta"),
-    ("E722", "print"),
-    ("E756", "terminal"),
-    ("E774", "chrome"),
-    ("E9D9", "tarefas"),
-];
+const LEGADO: &[(&str, &str)] =
+    &[("E8B7", "pasta"), ("E722", "print"), ("E756", "terminal"), ("E774", "chrome"), ("E9D9", "tarefas")];
 
 // paleta do desenho
-const ARCOIRIS: &[(f32, u32)] = &[
-    (0.00, 0xFF3CAC),
-    (0.28, 0x784BA0),
-    (0.56, 0x2B86C5),
-    (0.82, 0x00F5D4),
-    (1.00, 0xFEE440),
-];
+const ARCOIRIS: &[(f32, u32)] =
+    &[(0.00, 0xFF3CAC), (0.28, 0x784BA0), (0.56, 0x2B86C5), (0.82, 0x00F5D4), (1.00, 0xFEE440)];
 const FATIA: &[(f32, u32)] = &[(0.0, 0xFF3CAC), (0.5, 0x2B86C5), (1.0, 0x00F5D4)];
 const FUNDO_CENTRO: u32 = 0x0F172A;
 const FUNDO_BORDA: u32 = 0x1E293B;
@@ -92,12 +82,7 @@ fn resolver_icone(icone: &str, dados: &Path) -> FonteIcone {
 }
 
 fn cor(hex: u32, a: f32) -> sk::Color {
-    sk::Color::from_rgba8(
-        (hex >> 16) as u8,
-        (hex >> 8) as u8,
-        hex as u8,
-        (a.clamp(0.0, 1.0) * 255.0).round() as u8,
-    )
+    sk::Color::from_rgba8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8, (a.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
 fn degrade(p0: (f32, f32), p1: (f32, f32), stops: &[(f32, u32)], a: f32) -> sk::Shader<'static> {
@@ -142,14 +127,7 @@ fn arco(pb: &mut sk::PathBuilder, r: f32, a0: f32, a1: f32, mover: bool) {
     for _ in 0..n {
         let b = a + d;
         let (ca, sa, cb, sb) = (a.cos(), a.sin(), b.cos(), b.sin());
-        pb.cubic_to(
-            r * (ca - k * sa),
-            r * (sa + k * ca),
-            r * (cb + k * sb),
-            r * (sb - k * cb),
-            r * cb,
-            r * sb,
-        );
+        pb.cubic_to(r * (ca - k * sa), r * (sa + k * ca), r * (cb + k * sb), r * (sb - k * cb), r * cb, r * sb);
         a = b;
     }
 }
@@ -218,11 +196,7 @@ impl Desenho {
         db.load_system_fonts();
         db.set_sans_serif_family(if cfg!(windows) { "Segoe UI" } else { "Inter" });
         let opt = usvg::Options { fontdb: Arc::new(db), ..Default::default() };
-        let opcoes = cfg
-            .opcoes
-            .iter()
-            .map(|o| (o.nome.clone(), resolver_icone(&o.icone, dados)))
-            .collect();
+        let opcoes = cfg.opcoes.iter().map(|o| (o.nome.clone(), resolver_icone(&o.icone, dados))).collect();
         Desenho {
             geo: Geometria::new(cfg.raio),
             opcoes,
@@ -465,7 +439,11 @@ impl Desenho {
             let topo = cy - (passo_ic + th) / 2.0;
             let pares = [
                 (&rot.icone, cx - ti / 2.0, topo),
-                (&rot.texto, cx - rot.texto[0].as_ref().map(|p| p.width() as f32 / e).unwrap_or(0.0) / 2.0, topo + passo_ic),
+                (
+                    &rot.texto,
+                    cx - rot.texto[0].as_ref().map(|p| p.width() as f32 / e).unwrap_or(0.0) / 2.0,
+                    topo + passo_ic,
+                ),
             ];
             for (pms, x, y) in pares {
                 let (px, py) = pos(x, y);

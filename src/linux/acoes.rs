@@ -8,13 +8,14 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ConnectionExt as _, Keycode, Keysym, KEY_PRESS_EVENT, KEY_RELEASE_EVENT};
+use x11rb::protocol::xproto::{ConnectionExt as _, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, Keycode, Keysym};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::{CURRENT_TIME, NONE};
 
-use crate::config::{pasta_usuario, Opcao};
+use crate::atalho;
+use crate::config::{Acao, Opcao, pasta_usuario};
 use crate::log;
 
 // ------------------------------------------------------------ programas
@@ -22,11 +23,7 @@ use crate::log;
 /// Roda solto da roleta (grupo de processos próprio), na pasta do usuário.
 /// Uma thread espera o fim (sem processo zumbi) e registra no log se falhar.
 fn lancar(mut c: Command, desc: String) {
-    c.current_dir(pasta_usuario())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .process_group(0);
+    c.current_dir(pasta_usuario()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).process_group(0);
     let mut filho = match c.spawn() {
         Ok(f) => f,
         Err(e) => {
@@ -86,9 +83,8 @@ fn no_path(nome: &str) -> bool {
         return false;
     }
     std::env::var_os("PATH").is_some_and(|p| {
-        std::env::split_paths(&p).any(|d| {
-            std::fs::metadata(d.join(nome)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
+        std::env::split_paths(&p)
+            .any(|d| std::fs::metadata(d.join(nome)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
     })
 }
 
@@ -114,10 +110,9 @@ pub fn comando(linha: &str) {
 
 // ------------------------------------------------------------ teclado
 
-/// Nome de tecla no formato do pynput ("ctrl", "shift", "f5", "a"...) -> keysym do X.
-fn keysym_tecla(nome: &str) -> Option<Keysym> {
-    let n = nome.trim().trim_start_matches('<').trim_end_matches('>').to_lowercase();
-    let ks = match n.as_str() {
+/// Nome de tecla (já normalizado por [`atalho::teclas`]) -> keysym do X.
+fn keysym_tecla(n: &str) -> Option<Keysym> {
+    let ks = match n {
         "ctrl" | "ctrl_l" | "control" => 0xffe3,
         "ctrl_r" => 0xffe4,
         "shift" | "shift_l" => 0xffe1,
@@ -153,16 +148,10 @@ fn keysym_tecla(nome: &str) -> Option<Keysym> {
         "media_volume_down" => 0x1008ff11,
         "media_volume_mute" => 0x1008ff12,
         _ => {
-            if let Some(f) = n.strip_prefix('f').and_then(|x| x.parse::<u32>().ok())
-                && (1..=24).contains(&f) {
-                    return Some(0xffbe + f - 1);
-                }
-            let mut cs = n.chars();
-            let c = cs.next()?;
-            if cs.next().is_some() {
-                return None;
+            if let Some(f) = atalho::numero_f(n) {
+                return Some(0xffbe + Keysym::from(f) - 1);
             }
-            return Some(keysym_char(c));
+            return atalho::caractere(n).map(keysym_char);
         }
     };
     Some(ks)
@@ -252,17 +241,18 @@ impl<'a> Teclado<'a> {
     }
 }
 
+/// Devolve as teclas emprestadas mesmo se a ação parar no meio (erro, `?`).
+impl Drop for Teclado<'_> {
+    fn drop(&mut self) {
+        self.devolver();
+    }
+}
+
 fn atalho(conn: &RustConnection, valor: &str) -> Result<(), String> {
-    // "<ctrl>+<shift>+s" (formato do pynput). "+" sozinho no fim = tecla "+".
-    let mut partes: Vec<&str> = valor.split('+').collect();
-    if valor.ends_with("++") {
-        partes.truncate(partes.len().saturating_sub(2));
-        partes.push("+");
-    }
-    let mut syms = Vec::new();
-    for p in partes.iter().filter(|p| !p.trim().is_empty()) {
-        syms.push(keysym_tecla(p).ok_or_else(|| format!("tecla desconhecida: {p:?}"))?);
-    }
+    let syms = atalho::teclas(valor)?
+        .iter()
+        .map(|n| keysym_tecla(n).ok_or_else(|| format!("tecla desconhecida: {n:?}")))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut tec = Teclado::new(conn)?;
     let mut teclas = Vec::new();
     let mut shift = false;
@@ -272,17 +262,19 @@ fn atalho(conn: &RustConnection, valor: &str) -> Result<(), String> {
         teclas.push(kc);
     }
     // ex.: "+" no teclado americano é shift + "="
-    if shift && !syms.contains(&SHIFT)
-        && let Some((kc, _)) = tec.achar(SHIFT) {
-            teclas.insert(0, kc);
-        }
+    if shift
+        && !syms.contains(&SHIFT)
+        && let Some((kc, _)) = tec.achar(SHIFT)
+    {
+        teclas.insert(0, kc);
+    }
     for &kc in &teclas {
         tec.enviar(kc, true);
     }
     for &kc in teclas.iter().rev() {
         tec.enviar(kc, false);
     }
-    tec.devolver();
+    // as teclas emprestadas voltam no Drop do Teclado
     Ok(())
 }
 
@@ -312,23 +304,65 @@ fn digitar(conn: &RustConnection, texto: &str) -> Result<(), String> {
 
 /// Executa a opção. Devolve `true` se a opção pede para sair da roleta.
 pub fn executar(op: &Opcao, conn: &RustConnection) -> bool {
-    let r = match op.tipo.as_str() {
-        "abrir" => {
-            abrir(&op.valor);
+    let r = match &op.acao {
+        Acao::Abrir(v) => {
+            abrir(v);
             Ok(())
         }
-        "comando" => {
-            comando(&op.valor);
+        Acao::Comando(v) => {
+            comando(v);
             Ok(())
         }
-        "teclas" => atalho(conn, &op.valor),
-        "texto" => digitar(conn, &op.valor),
-        "sair" => return true,
-        t => Err(format!("tipo desconhecido: {t:?}")),
+        Acao::Teclas(v) => atalho(conn, v),
+        Acao::Texto(v) => digitar(conn, v),
+        Acao::Sair => return true,
+        Acao::Desconhecida(t) => Err(format!("tipo desconhecido: {t:?}")),
     };
     let _ = conn.flush();
     if let Err(e) = r {
         log::escrever(&format!("Erro ao executar {:?}: {e}", op.nome));
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconhece_uri() {
+        for s in ["https://exemplo.com", "mailto:a@b.c", "file:///tmp", "ms-settings:display", "x-y+z.w:1"] {
+            assert!(eh_uri(s), "{s:?}");
+        }
+        for s in ["google-chrome", "/home/x:y", "~/a:b", "c:/x", ":abc", "1ab:c", ""] {
+            assert!(!eh_uri(s), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn expande_til() {
+        let casa = pasta_usuario().display().to_string();
+        assert_eq!(expandir("~"), casa);
+        assert_eq!(expandir("~/ai"), format!("{casa}/ai"));
+        assert_eq!(expandir("~outro/ai"), "~outro/ai");
+        assert_eq!(expandir("/tmp/~"), "/tmp/~");
+    }
+
+    #[test]
+    fn keysyms_das_teclas() {
+        assert_eq!(keysym_tecla("ctrl"), Some(0xffe3));
+        assert_eq!(keysym_tecla("f1"), Some(0xffbe));
+        assert_eq!(keysym_tecla("f12"), Some(0xffc9));
+        assert_eq!(keysym_tecla("a"), Some(u32::from('a')));
+        assert_eq!(keysym_tecla("+"), Some(u32::from('+')));
+        assert_eq!(keysym_tecla("nada"), None);
+    }
+
+    #[test]
+    fn keysyms_dos_caracteres() {
+        assert_eq!(keysym_char('a'), 0x61);
+        assert_eq!(keysym_char('ç'), 0xe7); // Latin-1 direto
+        assert_eq!(keysym_char('€'), 0x0100_20ac); // Unicode
+        assert_eq!(keysym_char('\n'), 0xff0d);
+    }
 }

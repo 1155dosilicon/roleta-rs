@@ -14,10 +14,8 @@ fn main() {
     let grande = include_str!("../assets/icone.svg");
     let pequeno = include_str!("../assets/icone_pequeno.svg");
     let tamanhos = [16u32, 20, 24, 32, 40, 48, 64, 96, 128, 256];
-    let imgs: Vec<(u32, Vec<u8>)> = tamanhos
-        .iter()
-        .map(|&t| (t, render(if t <= 24 { pequeno } else { grande }, t)))
-        .collect();
+    let imgs: Vec<(u32, Vec<u8>)> =
+        tamanhos.iter().map(|&t| (t, render(if t <= 24 { pequeno } else { grande }, t))).collect();
     // ICO com imagens PNG dentro (aceito pelo Windows desde o Vista)
     let mut ico = Vec::new();
     ico.extend_from_slice(&[0, 0, 1, 0]);

@@ -23,10 +23,45 @@ pub type Ponto = (i32, i32);
 /// Retângulo do monitor: (esquerda, topo, direita, base), em pixels físicos.
 pub type Retangulo = (i32, i32, i32, i32);
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum Tick {
+    /// Nada mudou na tela.
     Nada,
     Pintar,
     Esconder,
+}
+
+/// Fatia sob o ponto (dx, dy) relativo ao centro, em px lógicos. A fatia 0
+/// fica em cima e as outras seguem no sentido horário. No furo do meio ou
+/// fora da roleta: `None`.
+fn fatia_em(dx: f32, dy: f32, n: usize, r_furo: f32, r: f32) -> Option<usize> {
+    let dist = dx.hypot(dy);
+    if n == 0 || dist < r_furo || dist > r {
+        return None;
+    }
+    let larg = TAU / n as f32;
+    let rel = (dy.atan2(dx) + FRAC_PI_2).rem_euclid(TAU);
+    Some((rel / larg).round() as usize % n)
+}
+
+/// Centro da roleta perto de `p`, com o quadrado de meio-lado `meio` inteiro
+/// dentro do monitor (se couber).
+fn centro_no_monitor(p: Ponto, monitor: Retangulo, meio: i32) -> Ponto {
+    let (l, t, r, b) = monitor;
+    let cx = p.0.max(l + meio).min((r - meio).max(l + meio));
+    let cy = p.1.max(t + meio).min((b - meio).max(t + meio));
+    (cx, cy)
+}
+
+/// Aproxima `v` de `alvo` (fração `k`), encostando quando falta pouco para a
+/// animação terminar de verdade. Devolve se mudou.
+fn aproximar(v: &mut f32, alvo: f32, k: f32) -> bool {
+    let antes = *v;
+    *v += (alvo - *v) * k;
+    if (alvo - *v).abs() < 0.002 {
+        *v = alvo;
+    }
+    *v != antes
 }
 
 pub struct Roleta {
@@ -74,26 +109,21 @@ impl Roleta {
         }
     }
 
-    fn dist_e_angulo(&self, p: Ponto) -> (f32, f32) {
-        let dx = (p.0 - self.centro.0) as f32 / self.escala;
-        let dy = (p.1 - self.centro.1) as f32 / self.escala;
-        (dx.hypot(dy), dy.atan2(dx))
+    /// Ponto relativo ao centro, em px lógicos.
+    fn relativo(&self, p: Ponto) -> (f32, f32) {
+        ((p.0 - self.centro.0) as f32 / self.escala, (p.1 - self.centro.1) as f32 / self.escala)
     }
 
+    /// No centro ou fora da roleta = nada selecionado (soltar cancela).
     pub fn indice_sob_cursor(&self, p: Ponto) -> Option<usize> {
-        let (dist, ang) = self.dist_e_angulo(p);
-        // no centro ou fora da roleta = nada selecionado (soltar cancela)
-        if dist < self.desenho.geo.r_furo || dist > self.desenho.geo.r {
-            return None;
-        }
-        let n = self.cfg.opcoes.len();
-        let larg = TAU / n as f32;
-        let rel = (ang + FRAC_PI_2).rem_euclid(TAU);
-        Some((rel / larg).round() as usize % n)
+        let (dx, dy) = self.relativo(p);
+        let g = &self.desenho.geo;
+        fatia_em(dx, dy, self.cfg.opcoes.len(), g.r_furo, g.r)
     }
 
     fn longe_demais(&self, p: Ponto) -> bool {
-        self.dist_e_angulo(p).0 > self.desenho.geo.r + MARGEM - 4.0
+        let (dx, dy) = self.relativo(p);
+        dx.hypot(dy) > self.desenho.geo.r + MARGEM - 4.0
     }
 
     /// Lado da janela (quadrada) em pixels físicos.
@@ -111,15 +141,14 @@ impl Roleta {
         }
         self.escala = escala;
         self.desenho.preparar(escala);
-        let meio = self.lado() as i32 / 2;
-        let (l, t, r, b) = monitor;
-        let cx = p.0.max(l + meio).min((r - meio).max(l + meio));
-        let cy = p.1.max(t + meio).min((b - meio).max(t + meio));
+        let meio = (self.lado() / 2) as i32;
+        let (cx, cy) = centro_no_monitor(p, monitor, meio);
         self.centro = (cx, cy);
         self.canto = (cx - meio, cy - meio);
 
         self.selecionada = None;
-        self.hover = vec![0.0; self.cfg.opcoes.len()];
+        self.hover.clear();
+        self.hover.resize(self.cfg.opcoes.len(), 0.0);
         self.esmaecer = 0.0;
         self.cancelar = 1.0;
         self.aberta = true;
@@ -164,6 +193,8 @@ impl Roleta {
     }
 
     /// Avança a animação. Chamar a cada `INTERVALO` enquanto `visivel`.
+    /// Devolve `Nada` quando o quadro ficaria igual ao anterior (roleta
+    /// aberta e parada), para não redesenhar à toa.
     pub fn tick(&mut self, p: Ponto) -> Tick {
         if !self.visivel {
             return Tick::Nada;
@@ -171,6 +202,7 @@ impl Roleta {
         let agora = Instant::now();
         let dt = (agora - self.ultimo).as_secs_f32().min(0.1);
         self.ultimo = agora;
+        let prog_antes = self.prog;
         if self.aberta {
             let t = ((agora - self.t_abertura).as_secs_f32() / T_ABRIR).min(1.0);
             self.prog = 1.0 - (1.0 - t).powi(3);
@@ -193,14 +225,15 @@ impl Roleta {
 
         // transições suaves do destaque (independente da taxa de quadros)
         let k = 1.0 - 0.68f32.powf(dt / 0.010);
+        let mut mudou = self.prog != prog_antes;
         for (i, h) in self.hover.iter_mut().enumerate() {
             let alvo = if Some(i) == self.selecionada { 1.0 } else { 0.0 };
-            *h += (alvo - *h) * k;
+            mudou |= aproximar(h, alvo, k);
         }
-        let tem = self.selecionada.is_some() as i32 as f32;
-        self.esmaecer += (tem - self.esmaecer) * k;
-        self.cancelar += ((1.0 - tem) - self.cancelar) * k;
-        Tick::Pintar
+        let tem = if self.selecionada.is_some() { 1.0 } else { 0.0 };
+        mudou |= aproximar(&mut self.esmaecer, tem, k);
+        mudou |= aproximar(&mut self.cancelar, 1.0 - tem, k);
+        if mudou { Tick::Pintar } else { Tick::Nada }
     }
 
     /// Quadro atual: RGBA pré-multiplicado, `lado` x `lado`.
@@ -214,8 +247,8 @@ impl Roleta {
         ((self.prog * 1.25).min(1.0) * 255.0).round() as u8
     }
 
-    pub fn opcao(&self, i: usize) -> Option<Opcao> {
-        self.cfg.opcoes.get(i).cloned()
+    pub fn opcao(&self, i: usize) -> Option<&Opcao> {
+        self.cfg.opcoes.get(i)
     }
 }
 
@@ -229,20 +262,81 @@ pub fn previa(pasta: &str) {
         d.preparar(escala);
         let casos: Vec<(String, Vec<f32>, f32)> = vec![
             ("nenhuma".into(), vec![0.0; n], 0.0),
-            ("sel0".into(), (0..n).map(|i| (i == 0) as i32 as f32).collect(), 1.0),
-            ("sel2".into(), (0..n).map(|i| (i == 2) as i32 as f32).collect(), 1.0),
+            ("sel0".into(), (0..n).map(|i| if i == 0 { 1.0 } else { 0.0 }).collect(), 1.0),
+            ("sel2".into(), (0..n).map(|i| if i == 2 { 1.0 } else { 0.0 }).collect(), 1.0),
         ];
         for (nome, hover, esm) in casos {
             let est = Estado { prog: 1.0, hover: &hover, esmaecer: esm, cancelar: 1.0 - esm };
-            let pm = d.desenhar(&est).clone();
+            let pm = d.desenhar(&est);
             // fundo cinza-azulado para enxergar a transparência
-            let mut fundo = sk::Pixmap::new(pm.width(), pm.height()).unwrap();
+            let Some(mut fundo) = sk::Pixmap::new(pm.width(), pm.height()) else { return };
             fundo.fill(sk::Color::from_rgba8(0x3a, 0x4a, 0x5a, 255));
-            fundo.draw_pixmap(0, 0, pm.as_ref(), &Default::default(), sk::Transform::identity(), None);
+            fundo.draw_pixmap(0, 0, pm.as_ref(), &sk::PixmapPaint::default(), sk::Transform::identity(), None);
             let arq = format!("{pasta}/previa_{nome}_{escala}x.png");
             if let Err(e) = fundo.save_png(&arq) {
                 eprintln!("{arq}: {e}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fatia_de_cima_e_sentido_horario() {
+        // 4 fatias, raio 100, furo 20; y cresce para baixo (tela)
+        assert_eq!(fatia_em(0.0, -50.0, 4, 20.0, 100.0), Some(0)); // cima
+        assert_eq!(fatia_em(50.0, 0.0, 4, 20.0, 100.0), Some(1)); // direita
+        assert_eq!(fatia_em(0.0, 50.0, 4, 20.0, 100.0), Some(2)); // baixo
+        assert_eq!(fatia_em(-50.0, 0.0, 4, 20.0, 100.0), Some(3)); // esquerda
+    }
+
+    #[test]
+    fn fatia_centrada_no_angulo() {
+        // com 4 fatias, a 0 vai de -45° a 45° em volta do topo
+        assert_eq!(fatia_em(30.0, -50.0, 4, 20.0, 100.0), Some(0));
+        assert_eq!(fatia_em(-30.0, -50.0, 4, 20.0, 100.0), Some(0));
+        assert_eq!(fatia_em(60.0, -50.0, 4, 20.0, 100.0), Some(1));
+    }
+
+    #[test]
+    fn furo_e_fora_nao_tem_fatia() {
+        assert_eq!(fatia_em(0.0, 0.0, 4, 20.0, 100.0), None);
+        assert_eq!(fatia_em(10.0, 10.0, 4, 20.0, 100.0), None);
+        assert_eq!(fatia_em(0.0, -101.0, 4, 20.0, 100.0), None);
+        assert_eq!(fatia_em(0.0, -50.0, 0, 20.0, 100.0), None);
+    }
+
+    #[test]
+    fn uma_opcao_ocupa_tudo() {
+        for (dx, dy) in [(0.0, -50.0), (50.0, 0.0), (0.0, 50.0), (-50.0, 0.0)] {
+            assert_eq!(fatia_em(dx, dy, 1, 20.0, 100.0), Some(0));
+        }
+    }
+
+    #[test]
+    fn centro_fica_dentro_do_monitor() {
+        let mon = (0, 0, 1920, 1080);
+        assert_eq!(centro_no_monitor((500, 500), mon, 100), (500, 500));
+        assert_eq!(centro_no_monitor((10, 10), mon, 100), (100, 100));
+        assert_eq!(centro_no_monitor((1915, 1075), mon, 100), (1820, 980));
+        // segundo monitor à direita
+        assert_eq!(centro_no_monitor((1930, 5), (1920, 0, 3840, 1080), 100), (2020, 100));
+        // monitor menor que a roleta: encosta no canto de cima/esquerda
+        assert_eq!(centro_no_monitor((50, 50), (0, 0, 150, 150), 100), (100, 100));
+    }
+
+    #[test]
+    fn aproximar_chega_no_alvo() {
+        let mut v = 0.0;
+        let mut passos = 0;
+        while aproximar(&mut v, 1.0, 0.32) {
+            passos += 1;
+            assert!(passos < 100, "não convergiu");
+        }
+        assert_eq!(v, 1.0);
+        assert!(!aproximar(&mut v, 1.0, 0.32));
     }
 }

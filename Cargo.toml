@@ -2,6 +2,8 @@
 name = "roleta"
 version = "0.2.1"
 edition = "2024"
+# let chains e slice::as_chunks (1.88), File::try_lock (1.89)
+rust-version = "1.89"
 description = "Menu radial para Windows e Linux (X11) acionado pelo botão lateral do mouse"
 license = "BSD-3-Clause"
 repository = "https://github.com/1155dosilicon/roleta-rs"
@@ -21,6 +23,10 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Wi
 x11rb = { version = "0.14.0", features = ["xtest", "shape", "randr"] }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io", "blocking"] }
 libc = "0.2"
+
+[lints.clippy]
+# todo bloco unsafe explica por que é seguro (// SAFETY: ...)
+undocumented_unsafe_blocks = "warn"
 
 [build-dependencies]
 winresource = "0.1.34"

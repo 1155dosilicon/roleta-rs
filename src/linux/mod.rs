@@ -17,6 +17,7 @@ use crate::log;
 /// A sessão gráfica (autostart do XFCE etc.) costuma não ter ~/.local/bin no
 /// PATH; sem isso os comandos da roleta não acham kitty, claude...
 pub fn preparar_processo() {
+    limpar_ambiente_claude();
     let casa = pasta_usuario();
     let atual: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
@@ -33,6 +34,28 @@ pub fn preparar_processo() {
     if let Ok(p) = std::env::join_paths(novo) {
         // SAFETY: chamado no início do main, antes de existir outra thread.
         unsafe { std::env::set_var("PATH", p) };
+    }
+}
+
+/// Se a roleta foi (re)iniciada de dentro de uma sessão do Claude Code, ela
+/// herda CLAUDECODE=1, CLAUDE_CODE_* etc. e repassa tudo aos programas que
+/// abre: o claude aberto pela roleta se acha "aninhado" e desliga o
+/// salvamento do transcript. Tira essas variáveis antes de lançar qualquer coisa.
+fn limpar_ambiente_claude() {
+    let nomes: Vec<_> = std::env::vars_os()
+        .filter_map(|(k, _)| {
+            let n = k.to_str()?;
+            (n == "CLAUDECODE"
+                || n == "CLAUDE_PID"
+                || n == "CLAUDE_EFFORT"
+                || n == "AI_AGENT"
+                || n.starts_with("CLAUDE_CODE_"))
+            .then_some(k)
+        })
+        .collect();
+    for k in nomes {
+        // SAFETY: chamado no início do main, antes de existir outra thread.
+        unsafe { std::env::remove_var(k) };
     }
 }
 

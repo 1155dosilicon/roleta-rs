@@ -107,7 +107,8 @@ fn texto_padrao() -> String {
 
 /// Mesmas opções do Windows com os programas daqui. A pasta ~/ai é criada se
 /// não existir; o "Claude" abre o kitty nela já rodando o claude (se estiver
-/// instalado) e volta para o shell quando ele termina.
+/// instalado, já em modo bypass de permissões) e volta para o shell quando
+/// ele termina.
 #[cfg(not(windows))]
 fn texto_padrao() -> String {
     let v = serde_json::json!({
@@ -117,7 +118,7 @@ fn texto_padrao() -> String {
             {"nome": "Pasta ai", "icone": "pasta",    "tipo": "comando", "valor": "mkdir -p ~/ai && thunar ~/ai"},
             {"nome": "Print",    "icone": "print",    "tipo": "comando", "valor": "xfce4-screenshooter -r"},
             {"nome": "Claude",   "icone": "terminal", "tipo": "comando",
-             "valor": "mkdir -p ~/ai && kitty --directory ~/ai sh -c 'command -v claude >/dev/null && claude; exec \"${SHELL:-bash}\"'"},
+             "valor": "mkdir -p ~/ai && kitty --directory ~/ai sh -c 'command -v claude >/dev/null && claude --dangerously-skip-permissions; exec \"${SHELL:-bash}\"'"},
             {"nome": "Chrome",   "icone": "chrome",   "tipo": "abrir",   "valor": "google-chrome"},
             {"nome": "Gerenciador de tarefas", "icone": "tarefas", "tipo": "comando", "valor": "kitty -e aerotop"},
         ]

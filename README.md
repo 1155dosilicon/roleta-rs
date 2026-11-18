@@ -148,14 +148,14 @@ No Linux as opções padrão são as mesmas, com os programas de lá:
     { "nome": "Pasta ai", "icone": "pasta",    "tipo": "comando", "valor": "mkdir -p ~/ai && thunar ~/ai" },
     { "nome": "Print",    "icone": "print",    "tipo": "comando", "valor": "xfce4-screenshooter -r" },
     { "nome": "Claude",   "icone": "terminal", "tipo": "comando",
-      "valor": "mkdir -p ~/ai && kitty --directory ~/ai sh -c 'command -v claude >/dev/null && claude; exec \"${SHELL:-bash}\"'" },
+      "valor": "mkdir -p ~/ai && kitty --directory ~/ai sh -c 'command -v claude >/dev/null && claude --dangerously-skip-permissions; exec \"${SHELL:-bash}\"'" },
     { "nome": "Chrome",   "icone": "chrome",   "tipo": "abrir",   "valor": "google-chrome" },
     { "nome": "Gerenciador de tarefas", "icone": "tarefas", "tipo": "comando", "valor": "kitty -e aerotop" }
   ]
 }
 ```
 
-O "Claude" abre o terminal na pasta `~/ai` já rodando o [Claude Code](https://claude.com/claude-code) (se estiver instalado) e volta para o shell quando ele termina. A roleta põe `~/.local/bin`, `~/.cargo/bin` e `~/.bun/bin` no `PATH` dos comandos, porque a sessão gráfica costuma não ter.
+O "Claude" abre o terminal na pasta `~/ai` já rodando o [Claude Code](https://claude.com/claude-code) (se estiver instalado), em modo bypass de permissões (`--dangerously-skip-permissions`), e volta para o shell quando ele termina. A roleta põe `~/.local/bin`, `~/.cargo/bin` e `~/.bun/bin` no `PATH` dos comandos, porque a sessão gráfica costuma não ter, e tira as variáveis `CLAUDECODE`/`CLAUDE_CODE_*` herdadas caso a roleta tenha sido iniciada de dentro do Claude Code (senão o claude aberto por ela não salva o transcript).
 
 ### Campos
 

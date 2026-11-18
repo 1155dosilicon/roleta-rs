@@ -1,6 +1,6 @@
 [package]
 name = "roleta"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 # let chains e slice::as_chunks (1.88), File::try_lock (1.89)
 rust-version = "1.89"

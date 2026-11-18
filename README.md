@@ -33,6 +33,8 @@ Menu radial (roleta de opções) para Windows, acionado pelo **botão lateral do
 
 ## 🚀 Instalação
 
+**Só quer usar?** Baixe o `Roleta.exe` na [página de releases](https://github.com/1155dosilicon/roleta-rs/releases/latest) e abra. Assim ele roda como usuário normal, então não aparece sobre janelas de administrador nem inicia com o Windows. Para isso, use o instalador:
+
 ```powershell
 git clone https://github.com/1155dosilicon/roleta-rs.git
 cd roleta-rs

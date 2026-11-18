@@ -35,7 +35,7 @@ Menu radial (roleta de opções) para **Windows** e **Linux (X11)**, acionado pe
 
 ### Windows
 
-**Só quer usar?** Baixe o `Roleta.exe` na [página de releases](https://github.com/1155dosilicon/roleta-rs/releases/latest) e abra. Assim ele roda como usuário normal, então não aparece sobre janelas de administrador nem inicia com o Windows. Para isso, use o instalador:
+**Só quer usar?** Baixe o `Roleta.exe` na [release v0.1.0](https://github.com/1155dosilicon/roleta-rs/releases/tag/v0.1.0) e abra. Assim ele roda como usuário normal, então não aparece sobre janelas de administrador nem inicia com o Windows. Para isso, use o instalador:
 
 ```powershell
 git clone https://github.com/1155dosilicon/roleta-rs.git

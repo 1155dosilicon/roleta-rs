@@ -61,13 +61,23 @@ powershell -ExecutionPolicy Bypass -File instalar.ps1 -Desinstalar
 
 ### Linux (X11)
 
+**Só quer usar?** Baixe o `roleta-<versão>-linux-x86_64.tar.gz` na [página de releases](https://github.com/1155dosilicon/roleta-rs/releases/latest) (binário estático, funciona em qualquer distro x86_64) e instale sem precisar do Rust:
+
+```sh
+tar xzf roleta-*-linux-x86_64.tar.gz
+cd roleta-*-linux-x86_64
+sh instalar.sh
+```
+
+Ou compile a partir do código:
+
 ```sh
 git clone https://github.com/1155dosilicon/roleta-rs.git
 cd roleta-rs
 sh instalar.sh
 ```
 
-O script compila com `cargo build --release`, instala em `~/.local/bin/roleta` (sem root), põe o início automático em `~/.config/autostart/roleta.desktop` e o atalho "Roleta" no menu de aplicativos, e inicia a roleta. Desinstalar: `sh instalar.sh --desinstalar`.
+O script compila com `cargo build --release` (ou usa o binário pronto do pacote), instala em `~/.local/bin/roleta` (sem root), põe o início automático em `~/.config/autostart/roleta.desktop` e o atalho "Roleta" no menu de aplicativos, e inicia a roleta. Desinstalar: `sh instalar.sh --desinstalar`.
 
 No Linux não existe a questão do administrador: o grab do X11 funciona em cima de qualquer janela. Os programas abertos pela roleta rodam soltos dela (grupo de processos próprio) e, se falharem, o erro vai para o log.
 

@@ -1,6 +1,6 @@
 [package]
 name = "roleta"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Menu radial para Windows e Linux (X11) acionado pelo botão lateral do mouse"
 license = "BSD-3-Clause"

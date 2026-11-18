@@ -1,7 +1,8 @@
 #!/bin/sh
 # Instala a roleta no Linux (X11) para o usuário atual:
 #   ~/.local/bin/roleta, início com a sessão (~/.config/autostart) e atalho no menu.
-# Uso: sh instalar.sh            compila, instala e inicia
+# Uso: sh instalar.sh            compila (ou usa o binário pronto do pacote
+#                                da release), instala e inicia
 #      sh instalar.sh --desinstalar
 set -eu
 
@@ -30,8 +31,16 @@ if [ "${XDG_SESSION_TYPE:-x11}" = "wayland" ]; then
     echo "Aviso: a roleta precisa de uma sessão X11; no Wayland o botão lateral não é capturado." >&2
 fi
 
-cargo build --release
-install -Dm755 target/release/roleta "$BIN"
+if [ -f Cargo.toml ]; then
+    cargo build --release
+    PRONTO=target/release/roleta
+elif [ -x ./roleta ]; then
+    PRONTO=./roleta # pacote da release, já compilado
+else
+    echo "Não achei o código-fonte (Cargo.toml) nem o binário ./roleta." >&2
+    exit 1
+fi
+install -Dm755 "$PRONTO" "$BIN"
 install -Dm644 assets/icone.svg "$ICONE"
 
 entrada() {

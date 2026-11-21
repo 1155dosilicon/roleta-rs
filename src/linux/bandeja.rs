@@ -52,6 +52,12 @@ impl ksni::Tray for Bandeja {
     fn title(&self) -> String {
         "Roleta do mouse".into()
     }
+    /// Nome no tema de ícones: a bandeja usa o desenho do tema do usuário (o
+    /// instalar.sh põe `roleta.svg` no hicolor, então o nome sempre resolve).
+    fn icon_name(&self) -> String {
+        "roleta".into()
+    }
+    /// Reserva para bandejas que não acham o nome no tema.
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         self.icones.clone()
     }

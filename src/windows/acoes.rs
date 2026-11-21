@@ -17,7 +17,7 @@ use windows_sys::Win32::System::Threading::{
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput,
-    VkKeyScanW,
+    VK_RETURN, VK_TAB, VkKeyScanW,
 };
 use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId, SW_SHOWNORMAL};
@@ -342,11 +342,24 @@ fn atalho(valor: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Quebra de linha e tab viram as teclas Enter e Tab (como no Linux): como
+/// caractere Unicode, muitos programas ignoram o "\n" ou não o tratam como Enter.
+fn tecla_do_caractere(u: u16) -> Option<u16> {
+    match u {
+        0x0A | 0x0D => Some(VK_RETURN),
+        0x09 => Some(VK_TAB),
+        _ => None,
+    }
+}
+
 fn digitar(texto: &str) {
+    let texto = texto.replace("\r\n", "\n");
     let mut ent = Vec::with_capacity(texto.len() * 2);
     for u in texto.encode_utf16() {
-        ent.push(unicode(u, false));
-        ent.push(unicode(u, true));
+        match tecla_do_caractere(u) {
+            Some(vk) => ent.extend([tecla(vk, false), tecla(vk, true)]),
+            None => ent.extend([unicode(u, false), unicode(u, true)]),
+        }
     }
     enviar(&ent);
 }
@@ -397,6 +410,14 @@ mod tests {
     #[test]
     fn altgr_vira_ctrl_alt() {
         assert_eq!(sequencia(&[(0x51, Mods(6))]), [VK_CONTROL, VK_MENU, 0x51]);
+    }
+
+    #[test]
+    fn quebra_de_linha_e_tab_viram_teclas() {
+        assert_eq!(tecla_do_caractere(u16::from(b'\n')), Some(VK_RETURN));
+        assert_eq!(tecla_do_caractere(u16::from(b'\r')), Some(VK_RETURN));
+        assert_eq!(tecla_do_caractere(u16::from(b'\t')), Some(VK_TAB));
+        assert_eq!(tecla_do_caractere(u16::from(b'a')), None);
     }
 
     #[test]

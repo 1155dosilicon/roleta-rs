@@ -1,7 +1,6 @@
 //! O que cada opção faz no Linux: abrir (xdg-open ou o programa), comando
 //! (sh -c), teclas e texto (teclado falso do XTest).
 
-use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -22,8 +21,15 @@ use crate::log;
 
 /// Roda solto da roleta (grupo de processos próprio), na pasta do usuário.
 /// Uma thread espera o fim (sem processo zumbi) e registra no log se falhar.
+///
+/// O stderr do programa vai direto para o log, e não para um cano lido pela
+/// roleta: com o cano, um processo que continua rodando em segundo plano
+/// (`sh -c "x &"`, ou o programa aberto quando a roleta reinicia) morria de
+/// SIGPIPE na primeira mensagem depois que a roleta saía, e o `sh` ficava
+/// zumbi enquanto o cano estivesse aberto.
 fn lancar(mut c: Command, desc: String) {
-    c.current_dir(pasta_usuario()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).process_group(0);
+    let err = log::arquivo().map_or_else(|_| Stdio::null(), Stdio::from);
+    c.current_dir(pasta_usuario()).stdin(Stdio::null()).stdout(Stdio::null()).stderr(err).process_group(0);
     let mut filho = match c.spawn() {
         Ok(f) => f,
         Err(e) => {
@@ -31,30 +37,10 @@ fn lancar(mut c: Command, desc: String) {
             return;
         }
     };
-    std::thread::spawn(move || {
-        // lê o stderr até o fim (senão o programa trava com o cano cheio),
-        // guardando só o final
-        let mut fim: Vec<u8> = Vec::new();
-        if let Some(mut err) = filho.stderr.take() {
-            let mut buf = [0u8; 4096];
-            while let Ok(n) = err.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                fim.extend_from_slice(&buf[..n]);
-                if fim.len() > 2000 {
-                    fim.drain(..fim.len() - 2000);
-                }
-            }
-        }
-        match filho.wait() {
-            Ok(s) if !s.success() => {
-                let msg = String::from_utf8_lossy(&fim);
-                log::escrever(&format!("{desc:?} terminou com {s}: {}", msg.trim()));
-            }
-            Err(e) => log::escrever(&format!("{desc:?}: {e}")),
-            _ => {}
-        }
+    std::thread::spawn(move || match filho.wait() {
+        Ok(s) if !s.success() => log::escrever(&format!("{desc:?} terminou com {s} (mensagens dele logo acima)")),
+        Err(e) => log::escrever(&format!("{desc:?}: {e}")),
+        _ => {}
     });
 }
 
@@ -159,7 +145,7 @@ fn keysym_tecla(n: &str) -> Option<Keysym> {
 
 fn keysym_char(c: char) -> Keysym {
     match c {
-        '\n' => 0xff0d,
+        '\n' | '\r' => 0xff0d,
         '\t' => 0xff09,
         '\u{20}'..='\u{7e}' | '\u{a0}'..='\u{ff}' => c as u32,
         _ => 0x0100_0000 | c as u32,
@@ -281,7 +267,8 @@ fn atalho(conn: &RustConnection, valor: &str) -> Result<(), String> {
 fn digitar(conn: &RustConnection, texto: &str) -> Result<(), String> {
     let mut tec = Teclado::new(conn)?;
     let shift = tec.achar(SHIFT).map(|(kc, _)| kc);
-    for c in texto.chars() {
+    // "\r\n" = um Enter só
+    for c in texto.replace("\r\n", "\n").chars() {
         let Some((kc, s)) = tec.tecla(keysym_char(c)) else {
             log::escrever(&format!("Sem tecla livre para digitar {c:?}"));
             continue;
@@ -364,5 +351,6 @@ mod tests {
         assert_eq!(keysym_char('ç'), 0xe7); // Latin-1 direto
         assert_eq!(keysym_char('€'), 0x0100_20ac); // Unicode
         assert_eq!(keysym_char('\n'), 0xff0d);
+        assert_eq!(keysym_char('\r'), 0xff0d);
     }
 }

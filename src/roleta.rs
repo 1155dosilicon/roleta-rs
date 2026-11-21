@@ -44,6 +44,11 @@ fn fatia_em(dx: f32, dy: f32, n: usize, r_furo: f32, r: f32) -> Option<usize> {
     Some((rel / larg).round() as usize % n)
 }
 
+/// O ponto (dx, dy) relativo ao centro, em px lógicos, está fora do furo do meio?
+fn fora_do_miolo(dx: f32, dy: f32, r_furo: f32) -> bool {
+    dx.hypot(dy) >= r_furo
+}
+
 /// Centro da roleta perto de `p`, com o quadrado de meio-lado `meio` inteiro
 /// dentro do monitor (se couber).
 fn centro_no_monitor(p: Ponto, monitor: Retangulo, meio: i32) -> Ponto {
@@ -121,6 +126,15 @@ impl Roleta {
         fatia_em(dx, dy, self.cfg.opcoes.len(), g.r_furo, g.r)
     }
 
+    /// Perto da borda do monitor a roleta é empurrada para dentro e o cursor
+    /// fica fora do miolo: em cima de uma fatia (soltar sem mexer escolheria
+    /// essa fatia) ou até longe demais (fecharia no primeiro quadro). Nesse
+    /// caso a plataforma leva o cursor para o `centro` logo depois de abrir.
+    pub fn precisa_centralizar(&self, p: Ponto) -> bool {
+        let (dx, dy) = self.relativo(p);
+        fora_do_miolo(dx, dy, self.desenho.geo.r_furo)
+    }
+
     fn longe_demais(&self, p: Ponto) -> bool {
         let (dx, dy) = self.relativo(p);
         dx.hypot(dy) > self.desenho.geo.r + MARGEM - 4.0
@@ -139,8 +153,8 @@ impl Roleta {
             self.fechar();
             return false;
         }
-        self.escala = escala;
         self.desenho.preparar(escala);
+        self.escala = self.desenho.escala(); // já limitada
         let meio = (self.lado() / 2) as i32;
         let (cx, cy) = centro_no_monitor(p, monitor, meio);
         self.centro = (cx, cy);
@@ -326,6 +340,28 @@ mod tests {
         assert_eq!(centro_no_monitor((1930, 5), (1920, 0, 3840, 1080), 100), (2020, 100));
         // monitor menor que a roleta: encosta no canto de cima/esquerda
         assert_eq!(centro_no_monitor((50, 50), (0, 0, 150, 150), 100), (100, 100));
+    }
+
+    /// Regressão: perto da borda o centro anda e o cursor cai numa fatia; sem
+    /// levar o cursor ao centro, um clique rápido executava essa fatia.
+    #[test]
+    fn perto_da_borda_o_cursor_sai_do_miolo() {
+        let (mon, meio, r_furo, r) = ((0, 0, 1366, 768), 156, 38.0, 130.0);
+        let rel = |p: Ponto| {
+            let c = centro_no_monitor(p, mon, meio);
+            ((p.0 - c.0) as f32, (p.1 - c.1) as f32)
+        };
+        // longe da borda: cursor no centro
+        let (dx, dy) = rel((683, 384));
+        assert!(!fora_do_miolo(dx, dy, r_furo));
+        // borda esquerda: cursor em cima da fatia da esquerda
+        let (dx, dy) = rel((60, 400));
+        assert!(fora_do_miolo(dx, dy, r_furo));
+        assert_eq!(fatia_em(dx, dy, 4, r_furo, r), Some(3));
+        // canto: fora da roleta
+        let (dx, dy) = rel((2, 2));
+        assert!(fora_do_miolo(dx, dy, r_furo));
+        assert_eq!(fatia_em(dx, dy, 4, r_furo, r), None);
     }
 
     #[test]

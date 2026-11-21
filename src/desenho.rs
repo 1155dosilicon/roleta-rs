@@ -109,7 +109,8 @@ fn solido(c: sk::Color) -> sk::Paint<'static> {
 }
 
 fn circulo(r: f32) -> sk::Path {
-    sk::PathBuilder::from_circle(0.0, 0.0, r.max(0.1)).unwrap()
+    // raio sempre positivo (e finito: vem do raio da configuração, já limitado)
+    sk::PathBuilder::from_circle(0.0, 0.0, r.max(0.1)).expect("círculo de raio positivo")
 }
 
 /// Arco de circunferência (centro na origem) com curvas de Bézier.
@@ -137,7 +138,8 @@ fn fatia(r_in: f32, r_out: f32, a0: f32, a1: f32) -> sk::Path {
     arco(&mut pb, r_out, a0, a1, true);
     arco(&mut pb, r_in, a1, a0, false);
     pb.close();
-    pb.finish().unwrap()
+    // dois arcos com pelo menos uma curva cada: o caminho nunca é vazio
+    pb.finish().expect("fatia tem pontos")
 }
 
 fn escapar(s: &str) -> String {
@@ -203,7 +205,7 @@ impl Desenho {
             opt,
             escala: 0.0,
             rotulos: Vec::new(),
-            quadro: sk::Pixmap::new(1, 1).unwrap(),
+            quadro: sk::Pixmap::new(1, 1).expect("pixmap 1x1"),
         }
     }
 
@@ -211,14 +213,21 @@ impl Desenho {
         (2.0 * (self.geo.r + MARGEM) * self.escala).ceil() as u32
     }
 
+    pub fn escala(&self) -> f32 {
+        self.escala
+    }
+
     /// Prepara os desenhos para a escala (DPI) do monitor. Só refaz se mudou.
+    /// A escala é limitada a 0,5..4 (um DPI absurdo não derruba a roleta).
     pub fn preparar(&mut self, escala: f32) {
+        let escala = if escala.is_finite() { escala.clamp(0.5, 4.0) } else { 1.0 };
         if (escala - self.escala).abs() < 0.001 && !self.rotulos.is_empty() {
             return;
         }
         self.escala = escala;
         let lado = self.lado_px();
-        self.quadro = sk::Pixmap::new(lado, lado).unwrap();
+        // com a escala limitada acima, o lado fica entre ~86 e ~3400 px
+        self.quadro = sk::Pixmap::new(lado, lado).expect("lado da roleta dentro do limite");
         let ti = (self.geo.tam_icone * escala).round() as u32;
         let fs = self.geo.tam_texto * escala;
         let larg = self.geo.r * 0.66 * escala;
@@ -354,7 +363,7 @@ impl Desenho {
             sk::SpreadMode::Pad,
             sk::Transform::identity(),
         ) {
-            let c = sk::PathBuilder::from_circle(0.0, 5.0, rs).unwrap();
+            let c = sk::PathBuilder::from_circle(0.0, 5.0, rs).expect("raio da sombra > raio da roleta > 0");
             q.fill_path(&c, &pincel(sh), sk::FillRule::Winding, ts, None);
         }
 
@@ -362,7 +371,7 @@ impl Desenho {
         let mut pb = sk::PathBuilder::new();
         pb.push_circle(0.0, 0.0, r);
         pb.push_circle(0.0, 0.0, g.r_furo);
-        let anel = pb.finish().unwrap();
+        let anel = pb.finish().expect("dois círculos de raio positivo");
         if let Some(sh) = sk::RadialGradient::new(
             sk::Point::zero(),
             0.0,
@@ -400,7 +409,8 @@ impl Desenho {
                 pb.line_to(r * a.cos(), r * a.sin());
             }
             let st = sk::Stroke { width: (1.5 * k).max(1.0), line_cap: sk::LineCap::Round, ..Default::default() };
-            q.stroke_path(&pb.finish().unwrap(), &solido(cor(0xFFFFFF, 0.18)), &st, ts, None);
+            // n > 1 linhas: o caminho nunca é vazio
+            q.stroke_path(&pb.finish().expect("divisórias"), &solido(cor(0xFFFFFF, 0.18)), &st, ts, None);
         }
 
         // contornos arco-íris

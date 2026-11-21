@@ -222,6 +222,12 @@ impl App {
             .stack_mode(StackMode::ABOVE);
         let _ = self.conn.configure_window(self.janela, &aux);
         let _ = self.conn.map_window(self.janela);
+        if self.r.precisa_centralizar(p) {
+            // centro dentro da tela: cabe em i16 (o X usa 16 bits)
+            let (cx, cy) = self.r.centro;
+            let _ = self.conn.warp_pointer(NONE, self.raiz, 0, 0, 0, 0, cx as i16, cy as i16);
+            self.ultimo_ponto = self.r.centro;
+        }
         self.pintar();
         if !estava_visivel {
             self.proximo_tick = Instant::now() + roleta::INTERVALO;
@@ -396,7 +402,9 @@ impl App {
             let _ = self.conn.ungrab_button(ButtonIndex::from(b), self.raiz, ModMask::ANY);
         }
         let _ = self.conn.destroy_window(self.janela);
-        let _ = self.conn.flush();
+        // sync (e não só flush): no "Reiniciar" a roleta nova pega os mesmos
+        // botões logo em seguida, e o X precisa ter soltado os nossos antes
+        let _ = self.conn.sync();
     }
 }
 

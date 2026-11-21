@@ -61,9 +61,15 @@ pub fn escrever(msg: &str) {
     if cfg!(test) {
         return;
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(caminho()) {
+    if let Ok(mut f) = arquivo() {
         let _ = writeln!(f, "{linha}");
     }
+}
+
+/// O arquivo de log aberto para acrescentar (no Linux também serve de stderr
+/// dos programas que a roleta abre).
+pub fn arquivo() -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().create(true).append(true).open(caminho())
 }
 
 pub fn inicio() {

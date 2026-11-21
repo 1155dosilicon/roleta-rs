@@ -164,6 +164,11 @@ impl App {
         if !abriu {
             return;
         }
+        if self.r.precisa_centralizar((pt.x, pt.y)) {
+            let (cx, cy) = self.r.centro;
+            // SAFETY: sem ponteiros; coordenadas físicas (processo per-monitor v2).
+            unsafe { SetCursorPos(cx, cy) };
+        }
         let lado = self.r.lado();
         if self.dib.as_ref().map(|d| d.lado) != Some(lado) {
             self.dib = Dib::new(lado);

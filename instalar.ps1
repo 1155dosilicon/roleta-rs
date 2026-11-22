@@ -1,11 +1,12 @@
 <#
-  Compila e instala a Roleta (versão Rust).
+  Instala a Roleta (versão Rust), compilando se precisar.
 
   Uso (PowerShell normal, NÃO precisa abrir como administrador):
       powershell -ExecutionPolicy Bypass -File instalar.ps1
 
   O que faz:
-    1. Compila Roleta.exe (cargo build --release).
+    1. Usa o Roleta.exe que vem ao lado do script (pacote da release) ou,
+       sem ele, compila (cargo build --release).
     2. Pede permissão de administrador (UAC) uma vez e:
          - substitui C:\Program Files\Roleta pelo Roleta.exe novo (um arquivo só)
          - cria a tarefa agendada "Roleta": inicia no logon, como administrador,
@@ -103,23 +104,31 @@ if ($Desinstalar) {
     return
 }
 
-Write-Output 'Compilando Roleta.exe...'
-# o cargo escreve o progresso no stderr: no PowerShell 5.1 isso viraria
-# "erro", então o log vai para um arquivo e só o resultado é conferido
-$logBuild = Join-Path $env:TEMP 'roleta_build.log'
-$p = Start-Process cargo -NoNewWindow -Wait -PassThru -WorkingDirectory $Aqui `
-        -RedirectStandardError $logBuild -ArgumentList @('build', '--release')
-$compilado = Join-Path $Aqui 'target\release\roleta.exe'
-if ($p.ExitCode -ne 0 -or -not (Test-Path $compilado)) {
-    Get-Content $logBuild -Tail 15
-    throw "Falha ao compilar (log: $logBuild)"
-}
-# cópia fora da pasta proj para a etapa de administrador
+# pacote da release (roleta-<versão>-windows-x86_64.zip): o Roleta.exe já vem
+# pronto ao lado deste script, então não precisa do Rust
+$pronto = Join-Path $Aqui 'Roleta.exe'
+# cópia fora da pasta do projeto para a etapa de administrador
 $build = Join-Path $env:TEMP 'roleta_build'
 New-Item -ItemType Directory -Force $build | Out-Null
 $exeTemp = Join-Path $build 'Roleta.exe'
-Copy-Item $compilado $exeTemp -Force
-Write-Output ('Compilado ({0:N1} MB).' -f ((Get-Item $exeTemp).Length / 1MB))
+if (Test-Path $pronto) {
+    Write-Output 'Usando o Roleta.exe do pacote.'
+    Copy-Item $pronto $exeTemp -Force
+} else {
+    Write-Output 'Compilando Roleta.exe...'
+    # o cargo escreve o progresso no stderr: no PowerShell 5.1 isso viraria
+    # "erro", então o log vai para um arquivo e só o resultado é conferido
+    $logBuild = Join-Path $env:TEMP 'roleta_build.log'
+    $p = Start-Process cargo -NoNewWindow -Wait -PassThru -WorkingDirectory $Aqui `
+            -RedirectStandardError $logBuild -ArgumentList @('build', '--release')
+    $compilado = Join-Path $Aqui 'target\release\roleta.exe'
+    if ($p.ExitCode -ne 0 -or -not (Test-Path $compilado)) {
+        Get-Content $logBuild -Tail 15
+        throw "Falha ao compilar (log: $logBuild)"
+    }
+    Copy-Item $compilado $exeTemp -Force
+}
+Write-Output ('Roleta.exe pronto ({0:N1} MB).' -f ((Get-Item $exeTemp).Length / 1MB))
 
 Write-Output 'Instalando (vai pedir permissão de administrador)...'
 Start-Process powershell -Verb RunAs -Wait -ArgumentList @(

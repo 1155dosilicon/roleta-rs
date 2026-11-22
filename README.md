@@ -35,7 +35,16 @@ Menu radial (roleta de opções) para **Windows** e **Linux (X11)**, acionado pe
 
 ### Windows
 
-**Só quer usar?** Baixe o `Roleta.exe` na [release v0.1.0](https://github.com/1155dosilicon/roleta-rs/releases/tag/v0.1.0) e abra. Assim ele roda como usuário normal, então não aparece sobre janelas de administrador nem inicia com o Windows. Para isso, use o instalador:
+**Só quer usar?** Baixe o `Roleta.exe` na [página de releases](https://github.com/1155dosilicon/roleta-rs/releases/latest) e abra. Assim ele roda como usuário normal, então não aparece sobre janelas de administrador nem inicia com o Windows.
+
+**Instalação completa** (inicia no logon, funciona sobre janelas elevadas): baixe o `roleta-<versão>-windows-x86_64.zip` da mesma página, extraia e rode, num PowerShell normal (não precisa do Rust):
+
+```powershell
+cd roleta-*-windows-x86_64
+powershell -ExecutionPolicy Bypass -File instalar.ps1
+```
+
+Ou, a partir do código-fonte (requer o Rust):
 
 ```powershell
 git clone https://github.com/1155dosilicon/roleta-rs.git
@@ -45,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File instalar.ps1
 
 O script:
 
-1. Compila `Roleta.exe` com `cargo build --release`
+1. Usa o `Roleta.exe` que veio no `.zip` ou, sem ele, compila com `cargo build --release`
 2. Pede permissão de administrador (UAC) **uma vez** e:
    - instala em `C:\Program Files\Roleta` (um único arquivo)
    - cria a tarefa agendada `Roleta`, que inicia no logon com privilégio elevado (sem UAC), garantindo que o hook funcione até em janelas de administrador
@@ -244,6 +253,7 @@ cargo build --release
 
 - `build.rs` e `winresource` embutem o ícone `.ico` e o manifesto no `.exe` (só quando o alvo é Windows)
 - Do Linux dá para compilar o `.exe`: `rustup target add x86_64-pc-windows-gnu`, instalar o `gcc-mingw-w64-x86-64` e `cargo build --release --target x86_64-pc-windows-gnu`
+- `scripts/release.sh` gera em `dist/` os pacotes de uma release, sempre Linux e Windows juntos: o `.tar.gz` (binário musl estático) e o `.zip`/`Roleta.exe` (MinGW num container `debian:trixie`, requer podman)
 - Só checar o código do Windows (`cargo clippy --target x86_64-pc-windows-gnu`) precisa apenas do `x86_64-w64-mingw32-windres`, que pode ser um link para o `llvm-windres`
 - `examples/gerar_icone.rs` regenera o `.ico` a partir dos SVGs em `assets/` (`cargo run --release --example gerar_icone`)
 - Pré-visualização de telas: `cargo run -- --previa pasta`
@@ -264,9 +274,10 @@ roleta-rs/
 │   ├── roleta.rs      # estado e animação (comum aos dois sistemas)
 │   ├── windows/       # hook, janela/bandeja e ações do Windows
 │   └── linux/         # X11, bandeja e ações do Linux
+├── scripts/release.sh # gera os pacotes da release (Linux + Windows)
 ├── build.rs           # embute ícone/manifesto no .exe
 ├── Cargo.toml
-├── instalar.ps1       # Windows: instala/desinstala (compila + UAC + tarefa agendada)
+├── instalar.ps1       # Windows: instala/desinstala (exe do .zip ou compila + UAC + tarefa agendada)
 └── instalar.sh        # Linux: instala/desinstala em ~/.local (compila + autostart)
 ```
 

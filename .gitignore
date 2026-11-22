@@ -4,3 +4,6 @@
 # temporários
 *.log
 *.tmp
+
+# arquivos da release (scripts/release.sh)
+/dist
